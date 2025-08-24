@@ -1,0 +1,26 @@
+# Minimal requirements without audio dependencies
+# Use this if you encounter installation issues with audio libraries
+
+# Core Dependencies
+fastapi==0.104.1
+uvicorn==0.24.0
+streamlit==1.28.2
+python-multipart==0.0.6
+
+# AI/LLM Dependencies
+langchain>=0.1.0
+langchain-community>=0.0.20
+langgraph>=0.0.40
+langchain-groq>=0.1.0
+
+# Basic speech recognition (works without audio playback)
+speechrecognition==3.10.0
+
+# Utilities
+requests==2.31.0
+python-dotenv==1.0.0
+pydantic>=2.0.0
+urllib3==2.1.0
+
+# Development
+pytest==7.4.3
