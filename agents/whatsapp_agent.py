@@ -36,7 +36,7 @@ class ContactSearchTool(BaseTool):
     
     # Mock contact database - in real implementation, this would connect to actual contacts
     mock_contacts = {
-        "jay": "+919876543210",
+        "jay": "+919321781905",
         "vijay": "+919876543211", 
         "mom": "+919876543212",
         "dad": "+919876543213",

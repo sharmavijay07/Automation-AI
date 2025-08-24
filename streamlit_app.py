@@ -21,7 +21,7 @@ from typing import Dict, Any, Optional
 import time
 
 from config import config
-from utils.speech_processor import speech_processor
+from utils.enhanced_speech_processor import enhanced_speech_processor
 
 # Custom CSS for better UI
 st.markdown("""
@@ -70,11 +70,11 @@ class StreamlitApp:
     def __init__(self):
         self.api_base_url = f"http://{config.FASTAPI_HOST}:{config.FASTAPI_PORT}"
         self.init_session_state()
-        # Display speech processor status safely
+        # Display enhanced speech processor status
         try:
-            speech_processor.display_status()
+            enhanced_speech_processor.display_status()
         except Exception as e:
-            st.warning(f"Speech processor status: {str(e)}")
+            st.info("ℹ️ Enhanced audio system will initialize when needed")
     
     def init_session_state(self):
         """Initialize Streamlit session state"""
@@ -130,16 +130,17 @@ class StreamlitApp:
             }
     
     def process_voice_input(self) -> Optional[str]:
-        """Process voice input using speech recognition"""
+        """Process voice input using enhanced speech recognition only"""
         try:
-            with st.spinner("🎤 Listening for your command..."):
-                success, result = speech_processor.listen_for_speech(
+            # Use enhanced processor with multi-engine support
+            with st.spinner("🎤 Listening with enhanced multi-engine recognition..."):
+                success, result = enhanced_speech_processor.listen_for_speech_enhanced(
                     timeout=config.SPEECH_TIMEOUT,
                     phrase_time_limit=config.SPEECH_PHRASE_TIME_LIMIT
                 )
             
             if success:
-                st.success(f"🎤 Heard: '{result}'")
+                st.success(f"🎤 Enhanced recognition heard: '{result}'")
                 return result
             else:
                 st.error(result)
@@ -218,25 +219,35 @@ class StreamlitApp:
         
         with col2:
             if st.button("🔧 Test Microphone", use_container_width=True):
-                with st.spinner("Testing microphone..."):
-                    success, message = speech_processor.test_microphone()
+                with st.spinner("Testing microphone with enhanced recognition..."):
+                    success, message = enhanced_speech_processor.test_microphone_enhanced()
+                
                 if success:
                     st.success(message)
                 else:
                     st.error(message)
         
-        # Voice tips
-        with st.expander("💡 Voice Command Tips"):
+        # Enhanced voice tips
+        with st.expander("💡 Enhanced Voice Command Tips"):
             st.markdown("""
             **Supported Commands:**
             - "Send WhatsApp to Jay: Hello how are you"
             - "Message Mom on WhatsApp: I'll be late"
             - "WhatsApp Vijay: Meeting at 5 PM"
             
-            **Tips:**
+            **Enhanced Features:**
+            - 🎆 **Multiple Recognition Engines**: Google + Whisper AI fallback
+            - 🔊 **Improved TTS**: Multiple audio systems with fallback
+            - 🎤 **Better Accuracy**: Enhanced noise reduction and language support
+            - 🌍 **Multi-Language**: en-US, en-IN, en-GB support
+            
+            **Tips for Best Results:**
             - Speak clearly and at normal pace
             - Include recipient name and message
             - Wait for the listening indicator
+            - Minimize background noise
+            - Ensure stable internet connection
+            - Start speaking immediately after clicking voice button
             """)
     
     def render_text_interface(self):
@@ -290,10 +301,10 @@ class StreamlitApp:
         if response.get("success", False):
             st.success(f"✅ {response.get('message', 'Command processed successfully!')}")
             
-            # Text-to-speech for successful commands
+            # Enhanced text-to-speech for successful commands
             if is_voice:
-                with st.spinner("🔊 Speaking response..."):
-                    speech_processor.text_to_speech(response.get('message', ''))
+                with st.spinner("🔊 Speaking response with enhanced TTS..."):
+                    enhanced_speech_processor.text_to_speech_enhanced(response.get('message', ''))
             
             # Show WhatsApp URL if available
             if response.get("details", {}).get("agent_response", {}).get("whatsapp_url"):
@@ -302,10 +313,10 @@ class StreamlitApp:
         else:
             st.error(f"❌ {response.get('message', 'Command failed')}")
             
-            # Text-to-speech for errors (shorter message)
+            # Enhanced text-to-speech for errors
             if is_voice:
                 error_msg = "Command failed. Please try again."
-                speech_processor.text_to_speech(error_msg)
+                enhanced_speech_processor.text_to_speech_enhanced(error_msg)
     
     def render_sidebar(self):
         """Render sidebar with additional information"""
@@ -354,11 +365,14 @@ class StreamlitApp:
                 st.write(f"Timeout: {config.SPEECH_TIMEOUT}s")
                 st.write(f"Phrase limit: {config.SPEECH_PHRASE_TIME_LIMIT}s")
                 
-                # Audio devices
-                st.write("**Audio Devices:**")
-                devices = speech_processor.get_audio_devices()
-                for device in devices[:3]:  # Show first 3
-                    st.write(f"  • {device}")
+                # Enhanced audio devices
+                st.write("**Enhanced Audio System:**")
+                try:
+                    devices = enhanced_speech_processor.get_audio_devices_enhanced()
+                    for device in devices[:10]:  # Show more devices
+                        st.write(f"  • {device}")
+                except Exception as e:
+                    st.warning(f"Audio device info failed: {str(e)}")
     
     def render_history(self):
         """Render command history"""
@@ -396,13 +410,15 @@ class StreamlitApp:
             
             # Footer
             st.markdown("---")
-            st.markdown("### 🎯 Current Features")
+            st.markdown("### 🎯 Enhanced Features")
             st.markdown("""
-            - **WhatsApp Agent**: Send messages via voice/text commands
-            - **Voice Recognition**: Hands-free command input
-            - **Text-to-Speech**: Audio feedback for responses
-            - **Contact Search**: Find contacts by name
-            - **URL Generation**: Create WhatsApp deep links
+            - **🚀 WhatsApp Agent**: Send messages via voice/text commands
+            - **🎤 Multi-Engine Voice Recognition**: Google + Whisper AI + fallback engines
+            - **🔊 Enhanced Text-to-Speech**: Multiple TTS systems with audio playback
+            - **📇 Smart Contact Search**: Find contacts by name with fuzzy matching
+            - **🔗 URL Generation**: Create WhatsApp deep links instantly
+            - **🌍 Multi-Language Support**: en-US, en-IN, en-GB recognition
+            - **🔧 Audio System Diagnostics**: Real-time audio system monitoring
             """)
             
             st.markdown("### 🚀 Coming Soon")

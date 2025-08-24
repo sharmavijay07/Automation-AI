@@ -26,10 +26,10 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# Add CORS middleware for Streamlit frontend
+# Add CORS middleware for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, specify your frontend URL
+    allow_origins=["http://localhost:3000", "*"],  # Allow Next.js dev server and all origins
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -216,12 +216,18 @@ if __name__ == "__main__":
         logger.error("❌ Configuration validation failed. Please check your .env file.")
         exit(1)
     
-    logger.info(f"🚀 Starting FastAPI server on {config.FASTAPI_HOST}:{config.FASTAPI_PORT}")
+    # Use port 8000 for Next.js frontend integration
+    HOST = "0.0.0.0"
+    PORT = 8000
+    
+    logger.info(f"🚀 Starting FastAPI server on {HOST}:{PORT}")
+    logger.info(f"📡 API will be available at: http://localhost:{PORT}")
+    logger.info(f"🌐 Next.js frontend should connect to: http://localhost:{PORT}")
     
     uvicorn.run(
         "main:app",
-        host=config.FASTAPI_HOST,
-        port=config.FASTAPI_PORT,
+        host=HOST,
+        port=PORT,
         reload=True,
         log_level="info"
     )

@@ -10,11 +10,19 @@ langchain-community>=0.0.20
 langgraph>=0.0.40
 langchain-groq>=0.1.0
 
-# Audio Processing
+# Audio Processing - Enhanced Version
 speechrecognition==3.10.0
 pydub==0.25.1
 gtts==2.4.0
 pygame==2.5.2
+
+# Alternative Speech Recognition Engines
+vosk==0.3.45
+whisper-openai
+soundfile==0.12.1
+numpy==1.24.3
+scipy==1.11.4
+librosa==0.10.1
 
 # Utilities
 requests==2.31.0
