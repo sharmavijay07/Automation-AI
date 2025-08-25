@@ -950,7 +950,11 @@ async def websocket_endpoint(websocket: WebSocket):
                             "timestamp": result.timestamp,
                             "requires_popup": result.requires_popup,
                             "whatsapp_url": result.whatsapp_url,
-                            "file_info": result.file_info
+                            "file_info": result.file_info,
+                            "agents_involved": [result.agent_used] if result.agent_used else [],
+                            "execution_time": 0,
+                            "workflow_id": f"ws_{datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                            "results": result.details or {}
                         }
                     })
     

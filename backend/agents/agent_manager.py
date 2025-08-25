@@ -61,11 +61,60 @@ class AgentManager:
                 if 'error' not in state:
                     state['error'] = None
                 
-                # First check if it's conversational input
-                if conversation_agent.is_conversational_input(state['user_input']):
+                user_input = state['user_input']
+                user_input_lower = user_input.lower()
+                
+                print(f"\n[DEBUG] Intent Detection:")
+                print(f"[DEBUG] User input: '{user_input}'")
+                
+                # Check conversational input first
+                is_conversational = conversation_agent.is_conversational_input(user_input)
+                print(f"[DEBUG] Is conversational: {is_conversational}")
+                
+                # Enhanced keyword detection with NLP patterns
+                file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music"]
+                whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform", "send whatsapp", "whatsapp to", "message to"]
+                
+                # Multi-agent detection (file + communication)
+                has_file_intent = any(keyword in user_input_lower for keyword in file_keywords)
+                has_whatsapp_intent = any(keyword in user_input_lower for keyword in whatsapp_keywords)
+                
+                # Special handling for WhatsApp patterns
+                whatsapp_patterns = ["send whatsapp", "whatsapp to", "message to", "text to"]
+                is_whatsapp_command = any(pattern in user_input_lower for pattern in whatsapp_patterns)
+                
+                print(f"[DEBUG] Has file intent: {has_file_intent}")
+                print(f"[DEBUG] Has WhatsApp intent: {has_whatsapp_intent}")
+                print(f"[DEBUG] Is WhatsApp command: {is_whatsapp_command}")
+                
+                # Priority routing: WhatsApp commands override conversational detection
+                if is_whatsapp_command or has_whatsapp_intent:
+                    if has_file_intent:
+                        state['detected_intent'] = "multi_agent"
+                        state['agent_name'] = "multi_agent"
+                        print(f"[DEBUG] Routed to: multi_agent (file + whatsapp)")
+                    else:
+                        state['detected_intent'] = "whatsapp"
+                        state['agent_name'] = "whatsapp"
+                        print(f"[DEBUG] Routed to: whatsapp")
+                    return state
+                
+                # File operations
+                elif has_file_intent:
+                    state['detected_intent'] = "filesearch"
+                    state['agent_name'] = "filesearch"
+                    print(f"[DEBUG] Routed to: filesearch")
+                    return state
+                
+                # Pure conversational input
+                elif is_conversational:
                     state['detected_intent'] = "conversation"
                     state['agent_name'] = "conversation"
+                    print(f"[DEBUG] Routed to: conversation (pure conversational)")
                     return state
+                
+                # Use LLM for complex intent detection
+                print(f"[DEBUG] Using LLM for intent detection...")
                 
                 system_prompt = """You are Vaani, an advanced AI assistant with natural language understanding.
                 Analyze the user input and classify it into the most appropriate category:
@@ -107,45 +156,29 @@ class AgentManager:
                 
                 messages = [
                     SystemMessage(content=system_prompt),
-                    HumanMessage(content=state['user_input'])
+                    HumanMessage(content=user_input)
                 ]
                 
                 response = self.llm.invoke(messages)
                 intent = response.content.strip().lower()
                 
+                print(f"[DEBUG] LLM detected intent: '{intent}'")
+                
                 # Enhanced intent validation with fallbacks
                 if intent in self.agents or intent == "multi_agent":
                     state['detected_intent'] = intent
                     state['agent_name'] = intent
+                    print(f"[DEBUG] Final routing: {intent}")
                 else:
-                    # Advanced keyword detection with NLP patterns
-                    user_input_lower = state['user_input'].lower()
-                    
-                    # File operation patterns
-                    file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music"]
-                    whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform"]
-                    
-                    # Multi-agent detection (file + communication)
-                    has_file_intent = any(keyword in user_input_lower for keyword in file_keywords)
-                    has_whatsapp_intent = any(keyword in user_input_lower for keyword in whatsapp_keywords)
-                    
-                    if has_file_intent and has_whatsapp_intent:
-                        state['detected_intent'] = "multi_agent"
-                        state['agent_name'] = "multi_agent"
-                    elif has_whatsapp_intent:
-                        state['detected_intent'] = "whatsapp"
-                        state['agent_name'] = "whatsapp"
-                    elif has_file_intent:
-                        state['detected_intent'] = "filesearch"
-                        state['agent_name'] = "filesearch"
-                    else:
-                        # Default to conversation for unclear inputs
-                        state['detected_intent'] = "conversation"
-                        state['agent_name'] = "conversation"
+                    # Default to conversation for unknown intents
+                    state['detected_intent'] = "conversation"
+                    state['agent_name'] = "conversation"
+                    print(f"[DEBUG] Unknown intent '{intent}', defaulting to conversation")
                 
                 return state
                 
             except Exception as e:
+                print(f"[DEBUG] Error in intent detection: {str(e)}")
                 state['error'] = f"Error in intent detection: {str(e)}"
                 return state
         

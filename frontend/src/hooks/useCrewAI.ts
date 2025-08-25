@@ -6,12 +6,16 @@ import useWebSocket, { ReadyState } from 'react-use-websocket';
 export interface CrewAIResult {
   success: boolean;
   message: string;
-  crew_used: string;
+  agent_used: string;
   agents_involved: string[];
   execution_time: number;
   workflow_id: string;
   results: Record<string, any>;
   timestamp: string;
+  intent?: string;
+  requires_popup?: boolean;
+  whatsapp_url?: string;
+  file_info?: any;
 }
 
 type BackendStatus = 'online' | 'offline' | 'checking';
@@ -179,7 +183,7 @@ export function useCrewAI() {
       const errorResult: CrewAIResult = {
         success: false,
         message: `❌ Error: ${errorMessage}`,
-        crew_used: 'error',
+        agent_used: 'error',
         agents_involved: [],
         execution_time: 0,
         workflow_id: 'error',
@@ -245,7 +249,7 @@ export function useCrewAI() {
       const errorResult: CrewAIResult = {
         success: false,
         message: `❌ Workflow error: ${error.message}`,
-        crew_used: workflowType,
+        agent_used: workflowType,
         agents_involved: [],
         execution_time: 0,
         workflow_id: 'error',

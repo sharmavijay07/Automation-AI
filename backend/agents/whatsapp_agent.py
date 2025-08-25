@@ -101,14 +101,68 @@ class WhatsAppAgent:
                     state['parsed_command'] = {}
                 if 'error' not in state:
                     state['error'] = None
-                # Use LLM to parse the command
+                    
+                user_input = state['user_input'].strip()
+                
+                # First try regex-based parsing for common patterns
+                import re
+                
+                # Pattern 1: "WhatsApp to [name] [message]"
+                pattern1 = r'(?:send\s+)?whatsapp\s+to\s+(\w+)\s+(.+)'
+                match1 = re.search(pattern1, user_input, re.IGNORECASE)
+                
+                # Pattern 2: "[Send] WhatsApp to [name]: [message]"
+                pattern2 = r'(?:send\s+)?whatsapp\s+to\s+(\w+)\s*:?\s*(.+)'
+                match2 = re.search(pattern2, user_input, re.IGNORECASE)
+                
+                # Pattern 3: "Message [name] [message]"
+                pattern3 = r'(?:send\s+)?message\s+(\w+)\s+(.+)'
+                match3 = re.search(pattern3, user_input, re.IGNORECASE)
+                
+                # Pattern 4: "Text [name] [message]"
+                pattern4 = r'(?:send\s+)?text\s+(\w+)\s+(.+)'
+                match4 = re.search(pattern4, user_input, re.IGNORECASE)
+                
+                recipient = None
+                message = None
+                
+                if match1:
+                    recipient, message = match1.groups()
+                elif match2:
+                    recipient, message = match2.groups()
+                elif match3:
+                    recipient, message = match3.groups()
+                elif match4:
+                    recipient, message = match4.groups()
+                
+                if recipient and message:
+                    state['parsed_command'] = {
+                        "recipient": recipient.strip(),
+                        "message": message.strip()
+                    }
+                    print(f"[DEBUG] Regex parsing success: {recipient} -> {message}")
+                    return state
+                
+                print(f"[DEBUG] Regex parsing failed, trying LLM parsing...")
+                
+                # Fallback to LLM parsing
                 system_prompt = """You are a command parser for WhatsApp messages. 
                 Extract the recipient name and message from user input.
                 
-                Examples:
+                Handle these patterns flexibly:
                 - "Send WhatsApp to Jay: Hello how are you" -> recipient: "Jay", message: "Hello how are you"
                 - "Message Vijay on WhatsApp: Meeting at 5 pm" -> recipient: "Vijay", message: "Meeting at 5 pm"
                 - "WhatsApp Mom: I'll be late" -> recipient: "Mom", message: "I'll be late"
+                - "WhatsApp to Jay hello" -> recipient: "Jay", message: "hello"
+                - "Send WhatsApp to Sarah good morning" -> recipient: "Sarah", message: "good morning"
+                - "Message John hi there" -> recipient: "John", message: "hi there"
+                - "text Mom I'm coming home" -> recipient: "Mom", message: "I'm coming home"
+                
+                Be flexible with:
+                - Different word orders
+                - Missing punctuation (colons, commas)
+                - Natural language patterns
+                - Implicit "send" or "message" verbs
                 
                 Return ONLY in this format:
                 RECIPIENT: [name]
@@ -119,14 +173,14 @@ class WhatsAppAgent:
                 
                 messages = [
                     SystemMessage(content=system_prompt),
-                    HumanMessage(content=state['user_input'])
+                    HumanMessage(content=user_input)
                 ]
                 
                 response = self.llm.invoke(messages)
                 response_text = response.content.strip()
                 
                 if "ERROR:" in response_text:
-                    state['error'] = "Could not understand the WhatsApp command. Please try: 'Send WhatsApp to [name]: [message]'"
+                    state['error'] = f"Could not understand the WhatsApp command. Please try formats like: 'WhatsApp to [name] [message]' or 'Send WhatsApp to [name]: [message]'"
                     return state
                 
                 # Parse the response
@@ -141,7 +195,7 @@ class WhatsAppAgent:
                         message = line.replace("MESSAGE:", "").strip()
                 
                 if not recipient or not message:
-                    state['error'] = "Could not extract recipient and message. Please try: 'Send WhatsApp to [name]: [message]'"
+                    state['error'] = f"Could not extract recipient and message. Please try formats like: 'WhatsApp to [name] [message]' or 'Send WhatsApp to [name]: [message]'"
                     return state
                 
                 state['parsed_command'] = {
@@ -149,6 +203,7 @@ class WhatsAppAgent:
                     "message": message
                 }
                 
+                print(f"[DEBUG] LLM parsing success: {recipient} -> {message}")
                 return state
                 
             except Exception as e:

@@ -235,17 +235,30 @@ class ConversationAgent:
     
     def is_conversational_input(self, user_input: str) -> bool:
         """Determine if input is conversational rather than a task command"""
-        conversational_patterns = [
-            r'\b(hi|hello|hey|good morning|good afternoon|good evening)\b',
-            r'\b(how are you|what\'s up|how\'s it going)\b',
-            r'\b(who are you|what can you do|help me|what are your capabilities)\b',
-            r'\b(thank you|thanks|appreciate)\b',
-            r'\b(bye|goodbye|see you|exit|quit)\b',
-            r'^\s*vaani\b',  # Direct address to Vaani
-            r'\?$',  # Questions
+        user_input_lower = user_input.lower()
+        
+        # First check if it's a WhatsApp or task command - these should NOT be conversational
+        task_patterns = [
+            r'\b(send|message|text|whatsapp)\s+\w+\s+to\b',  # "send/message/text X to Y"
+            r'\b(send whatsapp|whatsapp to|message to|text to)\b',  # WhatsApp specific patterns
+            r'\b(find|search|open|locate)\s+\w+',  # File operations
+            r'\b(share|send)\s+\w+\s+(via|on|through)\s+whatsapp\b',  # Sharing patterns
         ]
         
-        user_input_lower = user_input.lower()
+        # If it matches task patterns, it's NOT conversational
+        if any(re.search(pattern, user_input_lower) for pattern in task_patterns):
+            return False
+        
+        # Now check for conversational patterns
+        conversational_patterns = [
+            r'^\s*(hi|hello|hey|good morning|good afternoon|good evening)\s*$',  # Pure greetings
+            r'^\s*(how are you|what\'s up|how\'s it going)\s*\??\s*$',  # Status questions
+            r'^\s*(who are you|what can you do|help|what are your capabilities)\s*\??\s*$',  # Help/intro
+            r'^\s*(thank you|thanks|appreciate)\s*$',  # Gratitude
+            r'^\s*(bye|goodbye|see you|exit|quit)\s*$',  # Farewells
+            r'^\s*vaani\s*$',  # Just saying the name
+        ]
+        
         return any(re.search(pattern, user_input_lower) for pattern in conversational_patterns)
     
     def get_conversation_summary(self) -> str:

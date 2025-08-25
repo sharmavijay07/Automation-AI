@@ -3,6 +3,7 @@
 import { motion } from 'framer-motion';
 import { X, CheckCircle, AlertCircle, Clock, Users, Zap } from 'lucide-react';
 import { CrewAIResult } from '../hooks/useCrewAI';
+import { useEffect } from 'react';
 
 interface ResultDisplayProps {
   result: CrewAIResult;
@@ -11,6 +12,19 @@ interface ResultDisplayProps {
 
 export function ResultDisplay({ result, onClose }: ResultDisplayProps) {
   const isSuccess = result.success;
+  
+  // Handle keyboard events
+  useEffect(() => {
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        console.log('⌨️ Escape key pressed, closing modal');
+        onClose();
+      }
+    };
+    
+    document.addEventListener('keydown', handleEscape);
+    return () => document.removeEventListener('keydown', handleEscape);
+  }, [onClose]);
   
   const formatExecutionTime = (seconds: number) => {
     if (seconds < 1) return `${Math.round(seconds * 1000)}ms`;
@@ -21,13 +35,37 @@ export function ResultDisplay({ result, onClose }: ResultDisplayProps) {
     return new Date(timestamp).toLocaleTimeString();
   };
   
+  const handleClose = (e?: React.MouseEvent) => {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    console.log('🚪 Closing ResultDisplay modal - close button clicked');
+    onClose();
+  };
+  
+  const handleBackdropClick = (e: React.MouseEvent) => {
+    // Only close if clicking directly on the backdrop, not on child elements
+    if (e.target === e.currentTarget) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('🖱️ Backdrop clicked directly, closing modal');
+      onClose();
+    }
+  };
+  
+  const handleContentClick = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+  
   return (
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-      onClick={onClose}
+      onClick={handleBackdropClick}
     >
       <motion.div
         initial={{ scale: 0.9, opacity: 0, y: 20 }}
@@ -35,7 +73,7 @@ export function ResultDisplay({ result, onClose }: ResultDisplayProps) {
         exit={{ scale: 0.9, opacity: 0, y: 20 }}
         transition={{ type: "spring", duration: 0.5 }}
         className="w-full max-w-2xl max-h-[80vh] overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        onClick={handleContentClick}
       >
         {/* Main container with glassmorphism */}
         <div className="glass-strong rounded-2xl border border-white/20 shadow-2xl">
@@ -67,8 +105,9 @@ export function ResultDisplay({ result, onClose }: ResultDisplayProps) {
               <motion.button
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
-                onClick={onClose}
+                onClick={handleClose}
                 className="p-2 rounded-lg hover:bg-white/10 transition-colors"
+                aria-label="Close modal"
               >
                 <X className="w-6 h-6 text-gray-300" />
               </motion.button>
@@ -98,7 +137,7 @@ export function ResultDisplay({ result, onClose }: ResultDisplayProps) {
                   <Zap className="w-4 h-4 text-blue-400" />
                   <span className="text-sm font-medium text-gray-300">Crew</span>
                 </div>
-                <p className="text-white font-medium">{result.crew_used}</p>
+                <p className="text-white font-medium">{result.agent_used}</p>
               </div>
               
               {/* Execution Time */}
@@ -173,7 +212,7 @@ export function ResultDisplay({ result, onClose }: ResultDisplayProps) {
               <motion.button
                 whileHover={{ scale: 1.05 }}
                 whileTap={{ scale: 0.95 }}
-                onClick={onClose}
+                onClick={handleClose}
                 className="
                   px-6 py-2 rounded-lg
                   bg-white/10 border border-white/20

@@ -25,6 +25,8 @@ import { StatusIndicator } from '@/components/StatusIndicator';
 export default function CrewAIPage() {
   const [currentAgent, setCurrentAgent] = useState<string | null>(null);
   const [showResults, setShowResults] = useState(false);
+  const [showWhatsAppPopup, setShowWhatsAppPopup] = useState(false);
+  const [isManuallyClosing, setIsManuallyClosing] = useState(false);
   
   const {
     backendStatus,
@@ -32,7 +34,8 @@ export default function CrewAIPage() {
     lastResult,
     executeCommand,
     executeWorkflow,
-    checkStatus
+    checkStatus,
+    clearResult
   } = useCrewAI();
   
   const { playSound } = useSound();
@@ -43,6 +46,56 @@ export default function CrewAIPage() {
     const interval = setInterval(checkStatus, 10000);
     return () => clearInterval(interval);
   }, []);
+
+  // Handle WebSocket results for voice commands
+  useEffect(() => {
+    if (lastResult && !isProcessing && !isManuallyClosing) {
+      console.log('🔄 Processing result:', lastResult);
+      
+      // Only auto-show results if they're from WebSocket (not from manual actions)
+      // We can tell because WebSocket results come when not processing
+      if (!showResults) {
+        setShowResults(true);
+        
+        // Show WhatsApp popup for successful WhatsApp agent operations
+        // Check multiple conditions to ensure it's actually a successful WhatsApp operation
+        const isSuccessfulWhatsAppResult = lastResult.success && 
+          (lastResult.agent_used?.toLowerCase().includes('whatsapp') ||
+           lastResult.intent?.toLowerCase().includes('whatsapp')) &&
+          !lastResult.error && // Ensure no error occurred
+          (lastResult.whatsapp_url || lastResult.message?.includes('wa.me')); // Ensure we have a WhatsApp URL
+           
+        console.log('🔍 WhatsApp result check:', {
+          success: lastResult.success,
+          agent_used: lastResult.agent_used,
+          intent: lastResult.intent,
+          has_error: !!lastResult.error,
+          has_whatsapp_url: !!lastResult.whatsapp_url,
+          message_includes_wa_me: lastResult.message?.includes('wa.me'),
+          isSuccessfulWhatsAppResult,
+          isManuallyClosing
+        });
+        
+        if (isSuccessfulWhatsAppResult) {
+          console.log('✅ Triggering WhatsApp popup in 1.5 seconds');
+          setTimeout(() => {
+            setShowWhatsAppPopup(true);
+          }, 1500); // Show after 1.5 seconds
+        }
+        
+        // Play appropriate sound
+        playSound(lastResult.success ? 'success' : 'error');
+      }
+    }
+    
+    // Reset manual closing flag after processing
+    if (isManuallyClosing) {
+      const timer = setTimeout(() => {
+        setIsManuallyClosing(false);
+      }, 500); // Wait 500ms to ensure modal close animation completes
+      return () => clearTimeout(timer);
+    }
+  }, [lastResult, isProcessing, playSound, showResults, isManuallyClosing]);
 
   const handleVoiceStart = async () => {
     if (backendStatus !== 'online') return;
@@ -58,23 +111,8 @@ export default function CrewAIPage() {
         // Show visual feedback that we're processing
         console.log('✅ Processing command:', transcript);
         
-        // Process the voice command
-        const result = await executeCommand(transcript);
-        
-        if (result) {
-          setShowResults(true);
-          playSound(result.success ? 'success' : 'error');
-          
-          // Optional: Play TTS feedback
-          if (result.success) {
-            console.log('✅ Command executed successfully');
-          } else {
-            console.log('❌ Command failed:', result.message);
-          }
-        } else {
-          playSound('error');
-          console.log('❌ No result received from backend');
-        }
+        // Process the voice command (WebSocket will handle the result via useEffect)
+        await executeCommand(transcript);
       },
       (message: string) => {
         console.log('🎤 Voice feedback:', message);
@@ -88,6 +126,70 @@ export default function CrewAIPage() {
     const result = await executeWorkflow(agentType, { command });
     if (result) {
       setShowResults(true);
+      
+      // Show WhatsApp popup for successful WhatsApp operations from manual agent selection
+      const isSuccessfulWhatsAppResult = result.success && 
+        (result.agent_used?.toLowerCase().includes('whatsapp') ||
+         result.intent?.toLowerCase().includes('whatsapp')) &&
+        !result.error && // Ensure no error occurred
+        (result.whatsapp_url || result.message?.includes('wa.me')); // Ensure we have a WhatsApp URL
+        
+      if (isSuccessfulWhatsAppResult) {
+        setTimeout(() => {
+          setShowWhatsAppPopup(true);
+        }, 1500);
+      }
+    }
+  };
+
+  const shareToWhatsApp = async () => {
+    if (!lastResult) return;
+    
+    // Extract WhatsApp link from the result message using regex pattern
+    const whatsappLinkMatch = lastResult.message.match(/https:\/\/wa\.me\/[^\s]+/);
+    if (whatsappLinkMatch) {
+      // Use the existing WhatsApp link directly
+      const whatsappLink = whatsappLinkMatch[0];
+      setShowWhatsAppPopup(false);
+      window.open(whatsappLink, '_blank');
+    } else {
+      // Fallback: try to extract phone number and message text separately
+      const phoneMatch = lastResult.message.match(/wa\.me\/([+]?[0-9]+)/);
+      const textMatch = lastResult.message.match(/text=([^&\s]+)/);
+      
+      if (phoneMatch && textMatch) {
+        const phoneNumber = phoneMatch[1];
+        const messageText = decodeURIComponent(textMatch[1]);
+        const encodedPhone = encodeURIComponent(phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber);
+        const encodedMessage = encodeURIComponent(messageText);
+        const whatsappUrl = `https://api.whatsapp.com/send/?phone=${encodedPhone}&text=${encodedMessage}&type=phone_number&app_absent=0`;
+        setShowWhatsAppPopup(false);
+        window.open(whatsappUrl, '_blank');
+      } else {
+        // Final fallback - ask backend
+        try {
+          const response = await fetch('http://localhost:8000/process-command', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+              command: `Open WhatsApp link from: ${lastResult.message}`
+            })
+          });
+          
+          if (response.ok) {
+            const linkResult = await response.json();
+            if (linkResult.success && linkResult.details && linkResult.details.whatsapp_link) {
+              window.open(linkResult.details.whatsapp_link, '_blank');
+            }
+          }
+          setShowWhatsAppPopup(false);
+        } catch (error) {
+          setShowWhatsAppPopup(false);
+          console.error('Could not open WhatsApp link:', error);
+        }
+      }
     }
   };
 
@@ -303,8 +405,108 @@ export default function CrewAIPage() {
         {showResults && lastResult && (
           <ResultDisplay
             result={lastResult}
-            onClose={() => setShowResults(false)}
+            onClose={() => {
+              console.log('🚪 Manually closing results display');
+              setIsManuallyClosing(true);
+              setShowResults(false);
+              setShowWhatsAppPopup(false); // Also close WhatsApp popup if open
+              // Clear the lastResult to prevent modal from reopening
+              setTimeout(() => {
+                clearResult();
+              }, 300); // Small delay to allow close animation
+            }}
           />
+        )}
+      </AnimatePresence>
+      
+      {/* WhatsApp Popup */}
+      <AnimatePresence>
+        {showWhatsAppPopup && lastResult && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={(e) => {
+              e.preventDefault();
+              setShowWhatsAppPopup(false);
+            }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-2xl relative"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Close button */}
+              <button
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowWhatsAppPopup(false);
+                }}
+                className="absolute top-4 right-4 text-gray-400 hover:text-gray-600 transition-colors p-1 rounded-full hover:bg-gray-100"
+                aria-label="Close popup"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+              
+              <div className="text-center">
+                <div className="mx-auto flex items-center justify-center w-16 h-16 rounded-full bg-green-100 mb-4">
+                  <MessageCircle className="w-8 h-8 text-green-600" />
+                </div>
+                
+                <h3 className="text-xl font-semibold text-gray-900 mb-2">
+                  WhatsApp Message Ready!
+                </h3>
+                
+                {lastResult.agent_used && (
+                  <div className="mb-3 px-3 py-1 bg-blue-100 text-blue-800 text-sm rounded-full inline-block">
+                    🤖 {lastResult.agent_used} Agent
+                  </div>
+                )}
+                
+                <p className="text-sm text-gray-600 mb-6 leading-relaxed">
+                  Your WhatsApp message has been processed successfully. Click below to open WhatsApp and send your message.
+                </p>
+                
+                {lastResult.message && (
+                  <div className="mb-6 p-3 bg-gray-50 rounded-lg text-left">
+                    <p className="text-xs text-gray-500 mb-1">Message Details:</p>
+                    <p className="text-sm text-gray-700 line-clamp-3">{lastResult.message}</p>
+                  </div>
+                )}
+                
+                <div className="flex space-x-3">
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setShowWhatsAppPopup(false);
+                    }}
+                    className="flex-1 px-4 py-3 text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors font-medium"
+                  >
+                    Not Now
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      shareToWhatsApp();
+                    }}
+                    className="flex-1 px-4 py-3 text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors font-medium flex items-center justify-center space-x-2"
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    <span>Open WhatsApp</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
     </div>
