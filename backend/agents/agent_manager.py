@@ -9,6 +9,8 @@ from langchain_groq import ChatGroq
 from langgraph.graph import StateGraph, END
 from pydantic import BaseModel, Field
 from agents.whatsapp_agent import whatsapp_agent
+from agents.conversation_agent import conversation_agent
+from agents.filesearch_agent import filesearch_agent
 from config import config
 
 class AgentManagerState(TypedDict):
@@ -37,7 +39,9 @@ class AgentManager:
         
         # Register available agents
         self.agents = {
-            "whatsapp": whatsapp_agent
+            "whatsapp": whatsapp_agent,
+            "conversation": conversation_agent,
+            "filesearch": filesearch_agent
         }
         
         # Build MCP workflow
@@ -47,7 +51,7 @@ class AgentManager:
         """Build the MCP workflow for agent coordination"""
         
         def intent_detection_node(state: AgentManagerState) -> AgentManagerState:
-            """Detect user intent and route to appropriate agent"""
+            """Enhanced intent detection with conversational AI and natural language understanding"""
             try:
                 # Initialize default values if not present
                 if 'detected_intent' not in state:
@@ -56,21 +60,50 @@ class AgentManager:
                     state['agent_name'] = ""
                 if 'error' not in state:
                     state['error'] = None
-                system_prompt = """You are an intent classifier for an AI assistant that handles daily tasks.
-                Analyze the user input and classify it into one of these categories:
+                
+                # First check if it's conversational input
+                if conversation_agent.is_conversational_input(state['user_input']):
+                    state['detected_intent'] = "conversation"
+                    state['agent_name'] = "conversation"
+                    return state
+                
+                system_prompt = """You are Vaani, an advanced AI assistant with natural language understanding.
+                Analyze the user input and classify it into the most appropriate category:
                 
                 AVAILABLE AGENTS:
-                - whatsapp: For sending WhatsApp messages (keywords: whatsapp, message, send to, text to)
-                - unsupported: For any other requests not yet implemented
+                - whatsapp: WhatsApp messaging and communication
+                  * Patterns: "send message", "whatsapp", "text someone", "message [name]"
+                  * Natural: "tell mom I'm coming", "let dad know about meeting", "send hello to friend"
+                  
+                - filesearch: File operations, search, open, and sharing
+                  * Patterns: "find file", "open document", "search for", "locate", "show me files"
+                  * Natural: "where is my report", "open that presentation", "find my photos", "send file to someone"
+                  
+                - conversation: Conversational interactions, greetings, help
+                  * Patterns: "hello", "help", "what can you do", "who are you", "thanks"
+                  * Natural: "hi there", "I need help", "goodbye", "thank you"
+                  
+                - multi_agent: Complex tasks requiring multiple agents
+                  * Patterns: "send [file] to [contact]", "find and share", "search and message"
+                  * Natural: "send my report to boss on whatsapp", "find photo and share with mom"
+                
+                CLASSIFICATION RULES:
+                1. If mentioning files AND communication -> multi_agent
+                2. If clear WhatsApp/messaging intent -> whatsapp  
+                3. If clear file operation intent -> filesearch
+                4. If conversational/greeting -> conversation
+                5. If unclear -> conversation (Vaani will ask for clarification)
                 
                 Examples:
-                - "Send WhatsApp to Jay: Hello" -> whatsapp
-                - "Message Mom on WhatsApp: I'm coming" -> whatsapp
-                - "WhatsApp Vijay: Meeting at 5pm" -> whatsapp
-                - "Call John" -> unsupported
-                - "Open file" -> unsupported
+                - "Send report.pdf to boss on WhatsApp" -> multi_agent
+                - "Tell Sarah I'm running late" -> whatsapp
+                - "Find my Excel files" -> filesearch
+                - "Open presentation.pptx" -> filesearch
+                - "Send hello to mom" -> whatsapp
+                - "Hi, what can you do?" -> conversation
+                - "Where are my documents?" -> filesearch
                 
-                Return ONLY the agent name (whatsapp, unsupported). Nothing else."""
+                Return ONLY the agent name. Nothing else."""
                 
                 messages = [
                     SystemMessage(content=system_prompt),
@@ -80,22 +113,35 @@ class AgentManager:
                 response = self.llm.invoke(messages)
                 intent = response.content.strip().lower()
                 
-                # Validate intent
-                if intent in self.agents:
+                # Enhanced intent validation with fallbacks
+                if intent in self.agents or intent == "multi_agent":
                     state['detected_intent'] = intent
                     state['agent_name'] = intent
-                elif intent == "unsupported":
-                    state['detected_intent'] = "unsupported"
-                    state['agent_name'] = "unsupported"
                 else:
-                    # Fallback to keyword detection
+                    # Advanced keyword detection with NLP patterns
                     user_input_lower = state['user_input'].lower()
-                    if any(keyword in user_input_lower for keyword in ["whatsapp", "message", "send to", "text to"]):
+                    
+                    # File operation patterns
+                    file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music"]
+                    whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform"]
+                    
+                    # Multi-agent detection (file + communication)
+                    has_file_intent = any(keyword in user_input_lower for keyword in file_keywords)
+                    has_whatsapp_intent = any(keyword in user_input_lower for keyword in whatsapp_keywords)
+                    
+                    if has_file_intent and has_whatsapp_intent:
+                        state['detected_intent'] = "multi_agent"
+                        state['agent_name'] = "multi_agent"
+                    elif has_whatsapp_intent:
                         state['detected_intent'] = "whatsapp"
                         state['agent_name'] = "whatsapp"
+                    elif has_file_intent:
+                        state['detected_intent'] = "filesearch"
+                        state['agent_name'] = "filesearch"
                     else:
-                        state['detected_intent'] = "unsupported"
-                        state['agent_name'] = "unsupported"
+                        # Default to conversation for unclear inputs
+                        state['detected_intent'] = "conversation"
+                        state['agent_name'] = "conversation"
                 
                 return state
                 
@@ -104,27 +150,33 @@ class AgentManager:
                 return state
         
         def route_to_agent_node(state: AgentManagerState) -> AgentManagerState:
-            """Route command to the appropriate agent"""
+            """Enhanced routing with multi-agent coordination"""
             if state.get('error'):
                 return state
             
             try:
-                if state.get('agent_name') == "unsupported":
-                    state['agent_response'] = {
-                        "success": False,
-                        "message": "🚧 This feature is not yet implemented. Currently, I only support WhatsApp messaging. Try: 'Send WhatsApp to [name]: [message]'",
-                        "error": "Unsupported feature"
-                    }
+                agent_name = state.get('agent_name')
+                user_input = state['user_input']
+                
+                # Handle multi-agent workflows
+                if agent_name == "multi_agent":
+                    state['agent_response'] = self._handle_multi_agent_workflow(user_input)
                     return state
                 
-                # Route to specific agent
-                if state.get('agent_name') == "whatsapp":
-                    state['agent_response'] = self.agents["whatsapp"].process_command(state['user_input'])
+                # Route to specific agents
+                if agent_name == "conversation":
+                    state['agent_response'] = self.agents["conversation"].process_conversation(user_input)
+                elif agent_name == "whatsapp":
+                    state['agent_response'] = self.agents["whatsapp"].process_command(user_input)
+                elif agent_name == "filesearch":
+                    state['agent_response'] = self.agents["filesearch"].process_command(user_input)
                 else:
+                    # Fallback to conversation agent for unknown intents
                     state['agent_response'] = {
-                        "success": False,
-                        "message": "❌ Unknown agent requested",
-                        "error": "Unknown agent"
+                        "success": True,
+                        "message": "Hi! I'm Vaani, your AI assistant. I can help with WhatsApp messages, finding files, and general tasks. What would you like me to do?",
+                        "intent": "fallback",
+                        "context": {}
                     }
                 
                 return state
@@ -133,7 +185,7 @@ class AgentManager:
                 state['error'] = f"Error routing to agent: {str(e)}"
                 state['agent_response'] = {
                     "success": False,
-                    "message": f"❌ Error: {str(e)}",
+                    "message": f"Hi! I'm Vaani. I encountered a small issue: {str(e)}. Please try again!",
                     "error": str(e)
                 }
                 return state
@@ -175,6 +227,180 @@ class AgentManager:
         
         return workflow.compile()
     
+    def _handle_multi_agent_workflow(self, user_input: str) -> Dict[str, Any]:
+        """Handle complex workflows requiring multiple agents"""
+        try:
+            # First, try to parse the multi-agent intent
+            system_prompt = """Analyze this command to determine the multi-agent workflow needed:
+            
+            WORKFLOW TYPES:
+            1. file_to_whatsapp: Find/prepare file and send via WhatsApp
+            2. search_and_share: Search for files and prepare for sharing
+            3. open_and_inform: Open file and notify someone
+            
+            Extract:
+            - workflow_type: [file_to_whatsapp/search_and_share/open_and_inform]
+            - file_query: [file name/pattern to find]
+            - recipient: [person to send to]
+            - message: [optional message content]
+            
+            Examples:
+            - "Send report.pdf to boss on WhatsApp" -> file_to_whatsapp, report.pdf, boss
+            - "Find my photos and share with mom" -> search_and_share, photos, mom
+            - "Open presentation and tell team it's ready" -> open_and_inform, presentation, team
+            
+            Return format:
+            WORKFLOW: [type]
+            FILE: [query]
+            RECIPIENT: [name]
+            MESSAGE: [content or empty]
+            """
+            
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_input)
+            ]
+            
+            response = self.llm.invoke(messages)
+            response_text = response.content.strip()
+            
+            # Parse workflow parameters
+            workflow_type = ""
+            file_query = ""
+            recipient = ""
+            message = ""
+            
+            for line in response_text.split('\n'):
+                if line.startswith("WORKFLOW:"):
+                    workflow_type = line.replace("WORKFLOW:", "").strip()
+                elif line.startswith("FILE:"):
+                    file_query = line.replace("FILE:", "").strip()
+                elif line.startswith("RECIPIENT:"):
+                    recipient = line.replace("RECIPIENT:", "").strip()
+                elif line.startswith("MESSAGE:"):
+                    message = line.replace("MESSAGE:", "").strip()
+            
+            # Execute the multi-agent workflow
+            if workflow_type == "file_to_whatsapp" and file_query and recipient:
+                return self._execute_file_to_whatsapp_workflow(file_query, recipient, message)
+            elif workflow_type == "search_and_share" and file_query:
+                return self._execute_search_and_share_workflow(file_query, recipient)
+            else:
+                # Fallback: try to handle as best as possible
+                return self._execute_generic_multi_agent_workflow(user_input)
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Hi! I'm Vaani. I had trouble understanding that complex request. Could you try breaking it down? For example: 'Find my report' first, then 'Send report.pdf to boss on WhatsApp'.",
+                "error": str(e)
+            }
+    
+    def _execute_file_to_whatsapp_workflow(self, file_query: str, recipient: str, custom_message: str = "") -> Dict[str, Any]:
+        """Execute file search + WhatsApp sharing workflow"""
+        try:
+            # Step 1: Search for the file
+            file_result = self.agents["filesearch"].process_command(f"find {file_query}")
+            
+            if not file_result.get("success") or not file_result.get("search_results"):
+                return {
+                    "success": False,
+                    "message": f"🔍 I couldn't find '{file_query}'. Please check the filename and try again.",
+                    "workflow": "file_to_whatsapp",
+                    "step": "file_search_failed"
+                }
+            
+            # Get the best matching file
+            best_file = file_result["search_results"][0]["file_info"]
+            file_name = best_file["name"]
+            file_path = best_file["path"]
+            file_size_mb = best_file["size"] / (1024 * 1024)
+            
+            # Step 2: Prepare sharing message
+            if custom_message:
+                sharing_text = custom_message
+            else:
+                sharing_text = f"📁 Sharing file: {file_name} ({file_size_mb:.1f}MB)"
+            
+            # Step 3: Create WhatsApp message
+            whatsapp_command = f"Send WhatsApp to {recipient}: {sharing_text}"
+            whatsapp_result = self.agents["whatsapp"].process_command(whatsapp_command)
+            
+            if whatsapp_result.get("success"):
+                return {
+                    "success": True,
+                    "message": f"✅ Great! I found '{file_name}' and prepared WhatsApp message for {recipient}!\n\n📁 File: {file_name} ({file_size_mb:.1f}MB)\n💬 {whatsapp_result['message']}",
+                    "workflow": "file_to_whatsapp",
+                    "file_info": best_file,
+                    "whatsapp_result": whatsapp_result,
+                    "whatsapp_url": whatsapp_result.get("whatsapp_url", "")
+                }
+            else:
+                return {
+                    "success": False,
+                    "message": f"📁 I found '{file_name}' but couldn't create WhatsApp message: {whatsapp_result.get('message', 'Unknown error')}",
+                    "workflow": "file_to_whatsapp",
+                    "step": "whatsapp_failed"
+                }
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Hi! I'm Vaani. I had trouble with that file sharing request. Error: {str(e)}",
+                "workflow": "file_to_whatsapp",
+                "error": str(e)
+            }
+    
+    def _execute_search_and_share_workflow(self, file_query: str, recipient: str = "") -> Dict[str, Any]:
+        """Execute file search and prepare for sharing"""
+        try:
+            # Search for files
+            file_result = self.agents["filesearch"].process_command(f"search {file_query}")
+            
+            if not file_result.get("success") or not file_result.get("search_results"):
+                return {
+                    "success": False,
+                    "message": f"🔍 No files found matching '{file_query}'. Try a different search term.",
+                    "workflow": "search_and_share"
+                }
+            
+            # Format results for sharing
+            results = file_result["search_results"]
+            response_message = f"🔍 Found {len(results)} file(s) matching '{file_query}' ready for sharing:\n\n"
+            
+            for i, result in enumerate(results[:3], 1):
+                file_info = result["file_info"]
+                size_mb = file_info["size"] / (1024 * 1024)
+                response_message += f"{i}. 📄 {file_info['name']} ({size_mb:.1f}MB)\n"
+            
+            if recipient:
+                response_message += f"\n💡 Say 'Send [filename] to {recipient} on WhatsApp' to share!"
+            else:
+                response_message += f"\n💡 Say 'Send [filename] to [contact] on WhatsApp' to share!"
+            
+            return {
+                "success": True,
+                "message": response_message,
+                "workflow": "search_and_share",
+                "search_results": results
+            }
+            
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Search and share failed: {str(e)}",
+                "workflow": "search_and_share",
+                "error": str(e)
+            }
+    
+    def _execute_generic_multi_agent_workflow(self, user_input: str) -> Dict[str, Any]:
+        """Generic handler for complex requests"""
+        return {
+            "success": True,
+            "message": "Hi! I'm Vaani. That sounds like a complex task! I can help with:\n\n📱 WhatsApp: 'Send message to [contact]'\n📁 Files: 'Find [filename]' or 'Open [filename]'\n🔄 Combined: 'Send [filename] to [contact] on WhatsApp'\n\nWhat would you like me to help you with first?",
+            "workflow": "generic_guidance"
+        }
+    
     def process_command(self, user_input: str) -> Dict[str, Any]:
         """Process user command through MCP workflow"""
         try:
@@ -191,23 +417,38 @@ class AgentManager:
             # Run the workflow
             result = self.workflow.invoke(initial_state)
             
+            # Ensure all required fields exist in response
+            agent_response = result.get('agent_response', {})
+            
             return {
                 "success": not bool(result.get('error')),
-                "message": result.get('final_response', ''),
+                "message": result.get('final_response', 'Task completed'),
                 "intent": result.get('detected_intent', ''),
                 "agent_used": result.get('agent_name', ''),
-                "agent_response": result.get('agent_response', {}),
-                "error": result.get('error')
+                "agent_response": agent_response,
+                "error": result.get('error'),
+                # Additional fields for specific agents
+                "search_results": agent_response.get('search_results', []),
+                "selected_file": agent_response.get('selected_file'),
+                "action_type": agent_response.get('action_type'),
+                "whatsapp_url": agent_response.get('whatsapp_url'),
+                "workflow": agent_response.get('workflow')
             }
             
         except Exception as e:
+            error_msg = f"MCP Error: {str(e)}"
             return {
                 "success": False,
-                "message": f"❌ MCP Error: {str(e)}",
+                "message": f"❌ {error_msg}",
                 "intent": "error",
                 "agent_used": "none",
                 "agent_response": {},
-                "error": str(e)
+                "error": error_msg,
+                "search_results": [],
+                "selected_file": None,
+                "action_type": "error",
+                "whatsapp_url": None,
+                "workflow": None
             }
     
     def get_available_agents(self) -> List[str]:

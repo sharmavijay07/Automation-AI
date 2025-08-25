@@ -172,8 +172,8 @@ class EnhancedSpeechProcessor:
             
         return False
     
-    def listen_for_speech_enhanced(self, timeout: int = 7, phrase_time_limit: int = 15) -> Tuple[bool, str]:
-        """Enhanced speech recognition with multi-engine support"""
+    def listen_for_speech_enhanced(self, timeout: int = 10, phrase_time_limit: int = 20) -> Tuple[bool, str]:
+        """Enhanced speech recognition with multi-engine support and increased listening time"""
         
         # Ensure basic components are ready
         if not self._ensure_initialized():
@@ -185,12 +185,12 @@ class EnhancedSpeechProcessor:
                 st.info("🎤 Calibrating microphone...")
                 self.recognizer.adjust_for_ambient_noise(source, duration=1.5)
                 
-                # Listen for speech
-                st.info("🎤 Listening with enhanced recognition...")
+                # Listen for speech with extended timeouts
+                st.info("🎤 Listening with enhanced recognition... (Speak now!)")
                 audio = self.recognizer.listen(
                     source,
-                    timeout=timeout,
-                    phrase_time_limit=phrase_time_limit
+                    timeout=timeout,  # Extended to 10 seconds
+                    phrase_time_limit=phrase_time_limit  # Extended to 20 seconds
                 )
             
             # Try multiple recognition engines

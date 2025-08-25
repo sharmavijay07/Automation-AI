@@ -1,37 +1,45 @@
-# Core Dependencies
-fastapi==0.104.1
-uvicorn==0.24.0
-streamlit==1.28.2
-python-multipart==0.0.6
+# CrewAI Multi-Agent Framework (Python 3.11 recommended)
+crewai
+crewai-tools
 
-# AI/LLM Dependencies
-langchain>=0.1.0
-langchain-community>=0.0.20
-langgraph>=0.0.40
-langchain-groq>=0.1.0
+# FastAPI and Core Dependencies
+fastapi
+uvicorn[standard]
+pydantic
+python-multipart
 
-# Audio Processing - Enhanced Version
-speechrecognition==3.10.0
-pydub==0.25.1
-gtts==2.4.0
-pygame==2.5.2
+# AI and LLM Dependencies (Groq only - no OpenAI)
+langchain
+langchain-groq
+langchain-community
+groq
 
-# Alternative Speech Recognition Engines
-vosk==0.3.45
-whisper-openai
-soundfile==0.12.1
-numpy==1.24.3
-scipy==1.11.4
-librosa==0.10.1
+# Audio and Speech Processing
+speechrecognition
+gtts
+pydub
+pygame
+
+# File and System Operations
+watchdog
+python-magic
+pathlib2
+send2trash
 
 # Utilities
-requests==2.31.0
-python-dotenv==1.0.0
-pydantic==2.5.2
-urllib3==2.1.0
+python-dotenv
+requests
+aiofiles
+websockets
 
-pyaudio
+# Development and Testing
+pytest
+pytest-asyncio
+httpx
 
-# Development
-pytest==7.4.3
-black==23.11.0
+# Security and CORS
+python-jose[cryptography]
+passlib[bcrypt]
+
+langgraph
+streamlit

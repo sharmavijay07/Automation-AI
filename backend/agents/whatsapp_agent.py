@@ -5,7 +5,7 @@ Uses LangGraph for stateful workflow management
 
 import re
 import urllib.parse
-from typing import Dict, List, Any, Optional, TypedDict
+from typing import Dict, List, Any, Optional, TypedDict, ClassVar
 from langchain.tools import BaseTool
 from langchain.schema import BaseMessage, HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
@@ -31,11 +31,11 @@ class AgentState(TypedDict):
 
 class ContactSearchTool(BaseTool):
     """Tool to search for contact information"""
-    name = "contact_search"
-    description = "Search for contact information given a name"
+    name: str = "contact_search"
+    description: str = "Search for contact information given a name"
     
     # Mock contact database - in real implementation, this would connect to actual contacts
-    mock_contacts = {
+    mock_contacts: ClassVar[Dict[str, str]] = {
         "jay": "+919321781905",
         "vijay": "+919876543211", 
         "mom": "+919876543212",
@@ -54,8 +54,8 @@ class ContactSearchTool(BaseTool):
 
 class WhatsAppURLTool(BaseTool):
     """Tool to generate WhatsApp wa.me URLs"""
-    name = "whatsapp_url_generator"
-    description = "Generate WhatsApp wa.me URL for sending messages"
+    name: str = "whatsapp_url_generator"
+    description: str = "Generate WhatsApp wa.me URL for sending messages"
     
     def _run(self, phone_number: str, message: str) -> str:
         """Generate WhatsApp URL"""

@@ -3,17 +3,20 @@ FastAPI Backend for AI Task Automation Assistant
 Main server handling voice/text commands and agent coordination
 """
 
-from fastapi import FastAPI, HTTPException, File, UploadFile
+from fastapi import FastAPI, HTTPException, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Set
 import uvicorn
 import logging
+import json
+import asyncio
 from datetime import datetime
 
 from config import config
 from agents.agent_manager import agent_manager
+from utils.enhanced_speech_processor import enhanced_speech_processor
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -29,11 +32,27 @@ app = FastAPI(
 # Add CORS middleware for Next.js frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "*"],  # Allow Next.js dev server and all origins
+    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000", "*"],  # Allow Next.js dev server and all origins
     allow_credentials=True,
-    allow_methods=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["*"]
 )
+
+# Startup message with enhanced features
+@app.on_event("startup")
+async def startup_event():
+    """Initialize application with enhanced features"""
+    logger.info("🚀 Starting Enhanced AI Task Automation Assistant (Vaani)...")
+    logger.info("✨ Features: Conversational AI, FileSearch, Multi-Agent Coordination")
+    
+    # Validate configuration
+    if not config.validate_config():
+        logger.warning("⚠️  Configuration validation failed. Some features may not work.")
+    
+    logger.info("✅ Vaani AI Assistant started successfully!")
+    logger.info("🤖 Available agents: WhatsApp, FileSearch, Conversation")
+    logger.info("🎯 Enhanced NLP and multi-agent workflows ready!")
 
 # Pydantic models for request/response
 class CommandRequest(BaseModel):
@@ -49,6 +68,17 @@ class CommandResponse(BaseModel):
     agent_used: str
     timestamp: str
     details: Optional[Dict[str, Any]] = None
+
+class TTSRequest(BaseModel):
+    """Request model for text-to-speech"""
+    text: str
+    language: Optional[str] = "en"
+
+class TTSResponse(BaseModel):
+    """Response model for text-to-speech"""
+    success: bool
+    message: str
+    timestamp: str
 
 class HealthResponse(BaseModel):
     """Health check response"""
@@ -70,28 +100,29 @@ class HealthResponse(BaseModel):
 
 @app.get("/", response_model=HealthResponse)
 async def root():
-    """Root endpoint with health check"""
+    """Root endpoint with enhanced health check"""
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now().isoformat(),
-        version="1.0.0",
+        version="2.0.0 - Enhanced with Vaani AI",
         agents_available=agent_manager.get_available_agents()
     )
 
 @app.get("/health", response_model=HealthResponse)
 async def health_check():
-    """Health check endpoint"""
+    """Enhanced health check endpoint"""
     return HealthResponse(
         status="healthy",
         timestamp=datetime.now().isoformat(),
-        version="1.0.0",
+        version="2.0.0 - Enhanced with Vaani AI",
         agents_available=agent_manager.get_available_agents()
     )
 
 @app.post("/process-command", response_model=CommandResponse)
 async def process_command(request: CommandRequest):
     """
-    Process text or voice-to-text commands through MCP agent manager
+    Process text or voice-to-text commands through enhanced MCP agent manager
+    Now with conversational AI, FileSearch, and multi-agent coordination
     """
     try:
         logger.info(f"Processing command: {request.command}")
@@ -99,12 +130,14 @@ async def process_command(request: CommandRequest):
         if not request.command or not request.command.strip():
             raise HTTPException(status_code=400, detail="Command cannot be empty")
         
-        # Process command through agent manager
+        # Process command through enhanced agent manager
         result = agent_manager.process_command(request.command)
         
-        # Log the result
-        logger.info(f"Command processed - Success: {result['success']}, Agent: {result['agent_used']}")
+        # Enhanced logging with agent information
+        logger.info(f"Command processed - Success: {result['success']}, Agent: {result['agent_used']}, Intent: {result['intent']}")
+        logger.info(f"Agent response details: {result.get('agent_response', {})}")
         
+        # Enhanced response structure
         response = CommandResponse(
             success=result["success"],
             message=result["message"],
@@ -114,9 +147,17 @@ async def process_command(request: CommandRequest):
             details={
                 "original_command": request.command,
                 "agent_response": result["agent_response"],
-                "error": result.get("error")
+                "error": result.get("error"),
+                "workflow": result.get("workflow"),
+                "conversation_context": result.get("conversation_context"),
+                "file_results": result.get("agent_response", {}).get("search_results", []),
+                "selected_file": result.get("agent_response", {}).get("selected_file"),
+                "action_type": result.get("agent_response", {}).get("action_type"),
+                "whatsapp_url": result.get("whatsapp_url") or result.get("agent_response", {}).get("whatsapp_url")
             }
         )
+        
+        logger.info(f"Response prepared successfully for command: {request.command}")
         
         return response
         
@@ -152,15 +193,69 @@ async def process_voice(audio_file: UploadFile = File(...)):
         logger.error(f"Error processing voice: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Voice processing error: {str(e)}")
 
+@app.post("/text-to-speech", response_model=TTSResponse)
+async def text_to_speech(request: TTSRequest):
+    """
+    Convert text to speech using Vaani's enhanced TTS system
+    Provides audio feedback for responses
+    """
+    try:
+        logger.info(f"TTS request: {request.text[:50]}...")
+        
+        if not request.text or not request.text.strip():
+            raise HTTPException(status_code=400, detail="Text cannot be empty")
+        
+        # Use enhanced speech processor for TTS
+        success = enhanced_speech_processor.text_to_speech_enhanced(
+            text=request.text,
+            language=request.language
+        )
+        
+        return TTSResponse(
+            success=success,
+            message=f"Audio played: {request.text[:50]}..." if success else "Audio playback failed",
+            timestamp=datetime.now().isoformat()
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in TTS: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"TTS error: {str(e)}")
+
 @app.get("/agents")
 async def get_agents():
-    """Get list of available agents"""
+    """Get list of available agents with enhanced information"""
     try:
         agents = agent_manager.get_available_agents()
+        agent_info = {
+            "whatsapp": {
+                "name": "WhatsApp Agent",
+                "description": "Send messages via WhatsApp with natural language",
+                "capabilities": ["Send messages", "Contact search", "URL generation"],
+                "examples": ["Send WhatsApp to Mom: I'm coming home", "Tell dad about the meeting"]
+            },
+            "conversation": {
+                "name": "Vaani (Conversational AI)",
+                "description": "Natural conversation and assistance",
+                "capabilities": ["Greetings", "Help guidance", "Natural chat", "Task clarification"],
+                "examples": ["Hello", "What can you do?", "Help me", "Thank you"]
+            },
+            "filesearch": {
+                "name": "FileSearch Agent",
+                "description": "Find, open, and share files across devices",
+                "capabilities": ["File search", "File opening", "Cross-platform support", "File sharing prep"],
+                "examples": ["Find my report", "Open presentation.pptx", "Search for photos"]
+            }
+        }
+        
         return {
             "success": True,
             "agents": agents,
+            "agent_details": agent_info,
             "count": len(agents),
+            "multi_agent_support": True,
+            "natural_language": True,
             "timestamp": datetime.now().isoformat()
         }
     except Exception as e:
@@ -186,6 +281,86 @@ async def get_config():
     except Exception as e:
         logger.error(f"Error getting config: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# WebSocket Manager for real-time communication
+class WebSocketManager:
+    def __init__(self):
+        self.active_connections: Set[WebSocket] = set()
+    
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.add(websocket)
+        logger.info(f"🔌 WebSocket connected. Total connections: {len(self.active_connections)}")
+    
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.discard(websocket)
+        logger.info(f"🔌 WebSocket disconnected. Total connections: {len(self.active_connections)}")
+    
+    async def send_message(self, websocket: WebSocket, message: dict):
+        try:
+            await websocket.send_text(json.dumps(message))
+        except Exception as e:
+            logger.error(f"❌ Error sending WebSocket message: {e}")
+            self.disconnect(websocket)
+    
+    async def broadcast(self, message: dict):
+        disconnected = set()
+        for connection in self.active_connections.copy():
+            try:
+                await connection.send_text(json.dumps(message))
+            except Exception:
+                disconnected.add(connection)
+        
+        for conn in disconnected:
+            self.disconnect(conn)
+
+# Initialize WebSocket manager
+ws_manager = WebSocketManager()
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time communication"""
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            message = json.loads(data)
+            
+            if message.get("type") == "ping":
+                await ws_manager.send_message(websocket, {
+                    "type": "pong", 
+                    "timestamp": datetime.now().isoformat()
+                })
+            
+            elif message.get("type") == "command":
+                command = message.get("command", "")
+                if command:
+                    # Process command using the real agent manager
+                    request = CommandRequest(command=command)
+                    result = await process_command(request)
+                    
+                    # Convert result to WebSocket format
+                    await ws_manager.send_message(websocket, {
+                        "type": "command_result",
+                        "data": {
+                            "success": result.success,
+                            "message": result.message,
+                            "intent": result.intent,
+                            "agent_used": result.agent_used,
+                            "timestamp": result.timestamp,
+                            "crew_used": result.agent_used,  # For frontend compatibility
+                            "agents_involved": [result.agent_used],
+                            "execution_time": 0,
+                            "workflow_id": "ws_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
+                            "results": result.details or {}
+                        }
+                    })
+    
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as e:
+        logger.error(f"❌ WebSocket error: {e}")
+        ws_manager.disconnect(websocket)
 
 # Error handlers
 @app.exception_handler(404)
