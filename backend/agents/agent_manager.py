@@ -77,8 +77,20 @@ class AgentManager:
                 file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music", "ownership", "report", "presentation"]
                 whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform", "send whatsapp", "whatsapp to", "message to", "share"]
                 
+                # Detect file intent with better distinction
+                file_keywords = ["find", "search", "open", "ownership", "folder", "photo", "video", "pdf", "doc", "docx", "excel", "presentation", "report"]
+                
+                # Questions about capabilities (should go to conversation)
+                capability_questions = ["can you", "are you able", "do you", "what can", "how do", "tell me about", "what is", "explain", "why", "how"]
+                general_questions = ["what", "how", "why", "when", "where", "who", "?"]
+                is_capability_question = any(phrase in user_input_lower for phrase in capability_questions)
+                is_general_question = any(word in user_input_lower for word in general_questions) and not any(op_word in user_input_lower for op_word in ["find", "search", "open", "send"])
+                
+                # Actual file operations (should go to filesearch)
+                file_operation_keywords = ["find", "search", "open", "locate", "show me"]
+                has_file_operation = any(keyword in user_input_lower for keyword in file_operation_keywords) and not is_capability_question
+                
                 # Multi-agent detection (file + communication)
-                has_file_intent = any(keyword in user_input_lower for keyword in file_keywords)
                 has_whatsapp_intent = any(keyword in user_input_lower for keyword in whatsapp_keywords)
                 
                 # Special handling for multi-agent patterns
@@ -89,30 +101,39 @@ class AgentManager:
                 whatsapp_patterns = ["send whatsapp", "whatsapp to", "message to", "text to"]
                 is_whatsapp_command = any(pattern in user_input_lower for pattern in whatsapp_patterns)
                 
-                print(f"[DEBUG] Has file intent: {has_file_intent}")
+                print(f"[DEBUG] Is capability question: {is_capability_question}")
+                print(f"[DEBUG] Is general question: {is_general_question}")
+                print(f"[DEBUG] Has file operation: {has_file_operation}")
                 print(f"[DEBUG] Has WhatsApp intent: {has_whatsapp_intent}")
                 print(f"[DEBUG] Is WhatsApp command: {is_whatsapp_command}")
                 print(f"[DEBUG] Is multi-agent command: {is_multi_agent_command}")
                 
                 # Priority routing: Multi-agent commands first
-                if is_multi_agent_command or (has_file_intent and has_whatsapp_intent):
+                if is_multi_agent_command or (has_file_operation and has_whatsapp_intent):
                     state['detected_intent'] = "multi_agent"
                     state['agent_name'] = "multi_agent"
                     print(f"[DEBUG] Routed to: multi_agent (file + whatsapp)")
                     return state
                 
                 # WhatsApp commands override conversational detection
-                elif is_whatsapp_command or (has_whatsapp_intent and not has_file_intent):
+                elif is_whatsapp_command or (has_whatsapp_intent and not has_file_operation and not is_capability_question):
                     state['detected_intent'] = "whatsapp"
                     state['agent_name'] = "whatsapp"
                     print(f"[DEBUG] Routed to: whatsapp")
                     return state
                 
-                # File operations
-                elif has_file_intent:
+                # File operations (actual operations, not capability questions)
+                elif has_file_operation and not is_capability_question and not is_general_question:
                     state['detected_intent'] = "filesearch"
                     state['agent_name'] = "filesearch"
                     print(f"[DEBUG] Routed to: filesearch")
+                    return state
+                
+                # Capability questions and general questions go to conversation
+                elif is_capability_question or is_general_question:
+                    state['detected_intent'] = "conversation"
+                    state['agent_name'] = "conversation"
+                    print(f"[DEBUG] Routed to: conversation (capability/general question)")
                     return state
                 
                 # Pure conversational input
