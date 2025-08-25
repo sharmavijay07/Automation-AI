@@ -10,6 +10,7 @@ import time
 from typing import Optional, Tuple, List
 import streamlit as st
 from config import config
+from .conversational_tts import conversational_tts
 
 # Enhanced imports with ultra-safe fallbacks and optimizations
 try:
@@ -241,40 +242,59 @@ class EnhancedSpeechProcessor:
         return False, "🔇 Could not understand speech. Please try again."
     
     def text_to_speech_enhanced(self, text: str, language: str = 'en') -> bool:
-        """Enhanced text-to-speech with high-quality audio"""
+        """Production-level conversational text-to-speech"""
         
-        if not self.audio_systems.get('gtts'):
-            st.info(f"🔊 Would say: '{text}' (TTS not available)")
-            return True
-            
+        if not text or not text.strip():
+            return False
+        
         try:
-            # Ensure audio is ready
-            audio_ready = self._ensure_audio_ready()
+            # Use conversational TTS for natural speech
+            success = conversational_tts.speak_threaded(text)
             
-            if not audio_ready:
-                st.info(f"🔊 Would say: '{text}' (Audio playback not available)")
+            if success:
                 return True
-            
-            # Create and play TTS
-            tts = gTTS(text=text, lang=language, slow=False)
-            
-            with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
-                tts.save(tmp_file.name)
+            else:
+                # Fallback to basic TTS
+                return self._fallback_tts(text, language)
                 
-                pygame.mixer.music.load(tmp_file.name)
-                pygame.mixer.music.play()
+        except Exception as e:
+            print(f"🔊 Enhanced TTS error: {e}")
+            return self._fallback_tts(text, language)
+    
+    def _fallback_tts(self, text: str, language: str = 'en') -> bool:
+        """Fallback TTS implementation"""
+        try:
+            if self.audio_systems.get('gtts'):
+                # Ensure audio is ready
+                audio_ready = self._ensure_audio_ready()
                 
-                # Wait for completion
-                while pygame.mixer.music.get_busy():
-                    time.sleep(0.1)
+                if not audio_ready:
+                    print(f"🔊 Vaani says: '{text}' (Audio playback not available)")
+                    return True
                 
-                pygame.mixer.music.unload()
-                os.unlink(tmp_file.name)
+                # Create and play TTS
+                tts = gTTS(text=text, lang=language, slow=False)
                 
+                with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3') as tmp_file:
+                    tts.save(tmp_file.name)
+                    
+                    pygame.mixer.music.load(tmp_file.name)
+                    pygame.mixer.music.play()
+                    
+                    # Wait for completion
+                    while pygame.mixer.music.get_busy():
+                        time.sleep(0.1)
+                    
+                    pygame.mixer.music.unload()
+                    os.unlink(tmp_file.name)
+                    
+                    return True
+            else:
+                print(f"🔊 Vaani says: '{text}'")
                 return True
                 
         except Exception as e:
-            st.info(f"🔊 Would say: '{text}' (TTS error: {str(e)})")
+            print(f"🔊 Vaani says: '{text}' (TTS error: {str(e)})")
             return True
     
     def test_microphone_enhanced(self) -> Tuple[bool, str]:

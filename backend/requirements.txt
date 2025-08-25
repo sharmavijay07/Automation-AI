@@ -15,8 +15,8 @@ langchain-community
 groq
 
 # Audio and Speech Processing
-speechrecognition
-gtts
+SpeechRecognition
+gTTS
 pydub
 pygame
 
@@ -40,6 +40,23 @@ httpx
 # Security and CORS
 python-jose[cryptography]
 passlib[bcrypt]
+
+# MongoDB and Database
+pymongo
+motor
+
+# Enhanced TTS and Conversational AI (Best Free Libraries)
+edge-tts
+pyttsx3
+TTS
+whisper-openai
+vosk
+soundfile
+sounddevice
+numpy
+scipy
+librosa
+audioread
 
 langgraph
 streamlit

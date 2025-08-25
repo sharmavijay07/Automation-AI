@@ -18,6 +18,20 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
+# JSON serialization helper function
+def json_serializable(obj):
+    """Convert objects to JSON serializable format"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [json_serializable(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        return json_serializable(obj.__dict__)
+    else:
+        return obj
+
 # Import real functionality from main.py components
 try:
     from config import config
@@ -42,6 +56,16 @@ except Exception as e:
     enhanced_speech_processor = None
     SPEECH_PROCESSOR_AVAILABLE = False
     print(f"⚠️  Enhanced Speech Processor not available: {e}")
+
+try:
+    from utils.conversational_tts import conversational_tts
+    from utils.conversation_memory import conversation_memory
+    CONVERSATIONAL_AI_AVAILABLE = True
+except Exception as e:
+    conversational_tts = None
+    conversation_memory = None
+    CONVERSATIONAL_AI_AVAILABLE = False
+    print(f"⚠️  Conversational AI features not available: {e}")
 
 # Import CrewAI orchestrator
 try:
@@ -400,24 +424,80 @@ async def health():
 
 @app.post("/process-command", response_model=CommandResponse)
 async def process_command(request: CommandRequest) -> CommandResponse:
-    """Enhanced command processing with real agents and CrewAI orchestration"""
-    logger.info(f"📥 Processing enhanced command: {request.command}")
+    """Enhanced command processing with natural conversation and voice feedback"""
+    logger.info(f"📥 Processing conversational command: {request.command}")
+    
+    # Special handling for frontend fallback requests to prevent infinite loops
+    command = request.command.strip()
+    if command.lower().startswith(('open whatsapp link from:', 'extract whatsapp link from:')):
+        logger.info("⚠️ Detected frontend fallback request - providing safe response")
+        return CommandResponse(
+            success=False,
+            message="❌ No valid WhatsApp link found in the provided content. Please try a direct WhatsApp command like 'Send WhatsApp to [contact]: [message]'.",
+            intent="whatsapp_extraction_failed",
+            agent_used="fallback_handler",
+            timestamp=datetime.now().isoformat(),
+            requires_popup=False,
+            details={"original_command": command, "processing_method": "fallback_prevention"}
+        )
     
     try:
         # Validate input
-        if not request.command or not request.command.strip():
+        if not command:
             raise HTTPException(status_code=400, detail="Command cannot be empty")
+        user_id = request.user_id or "default_user"
         
-        command = request.command.strip()
+        # Get conversation context for better responses
+        conversation_context = None
+        if CONVERSATIONAL_AI_AVAILABLE and conversation_memory:
+            conversation_context = await conversation_memory.get_conversation_context(user_id)
         
         # Try real agent manager first (preferred)
         if AGENT_MANAGER_AVAILABLE and agent_manager:
-            logger.info("🎯 Using real agent manager for enhanced processing")
+            logger.info("🎯 Using real agent manager with conversational AI")
             
             result = agent_manager.process_command(command)
             
             # Enhanced logging
             logger.info(f"Real agent processed - Success: {result['success']}, Agent: {result['agent_used']}, Intent: {result['intent']}")
+            
+            # Natural voice feedback (async to not block response)
+            if CONVERSATIONAL_AI_AVAILABLE and conversational_tts and config.ENABLE_VOICE_FEEDBACK:
+                try:
+                    # Create natural response for TTS
+                    tts_message = result["message"]
+                    
+                    # Make it more conversational
+                    if result["success"]:
+                        if "whatsapp" in result["agent_used"].lower():
+                            tts_message = "Perfect! I've prepared your WhatsApp message. Opening it now."
+                        elif "filesearch" in result["agent_used"].lower():
+                            tts_message = "Great! I found what you're looking for."
+                        elif "conversation" in result["agent_used"].lower():
+                            tts_message = result["message"]  # Keep conversational responses as-is
+                    
+                    # Speak asynchronously
+                    conversational_tts.speak_threaded(tts_message)
+                except Exception as e:
+                    logger.warning(f"Voice feedback error: {e}")
+            
+            # Store conversation in memory
+            if CONVERSATIONAL_AI_AVAILABLE and conversation_memory:
+                try:
+                    await conversation_memory.add_conversation_entry(
+                        user_id=user_id,
+                        user_message=command,
+                        vaani_response=result["message"],
+                        metadata={
+                            "agent_used": result["agent_used"],
+                            "success": result["success"],
+                            "intent": result["intent"],
+                            "type": "command_execution",
+                            "response_time": 0  # Could measure actual time
+                        }
+                    )
+                except Exception as e:
+                    logger.warning(f"Memory storage error: {e}")
             
             # Convert to enhanced response format
             return CommandResponse(
@@ -433,10 +513,10 @@ async def process_command(request: CommandRequest) -> CommandResponse:
                     "original_command": command,
                     "agent_response": result.get("agent_response", {}),
                     "workflow": result.get("workflow"),
-                    "conversation_context": result.get("conversation_context"),
+                    "conversation_context": conversation_context,
                     "file_results": result.get("agent_response", {}).get("search_results", []),
                     "action_type": result.get("agent_response", {}).get("action_type"),
-                    "processing_method": "real_agent_manager"
+                    "processing_method": "enhanced_conversational_agent"
                 }
             )
         
@@ -855,15 +935,18 @@ async def get_config():
     try:
         config_info = {
             "success": True,
-            "version": "3.0.0 - Enhanced CrewAI with Real Functionality",
+            "version": "4.0.0 - Production Conversational AI with Voice & Memory",
             "features": {
                 "crewai_available": CREWAI_AVAILABLE,
                 "speech_processor_available": SPEECH_PROCESSOR_AVAILABLE,
                 "agent_manager_available": AGENT_MANAGER_AVAILABLE,
                 "config_available": CONFIG_AVAILABLE,
+                "conversational_ai_available": CONVERSATIONAL_AI_AVAILABLE,
                 "real_file_access": True,
                 "enhanced_whatsapp": True,
-                "websocket_support": True
+                "websocket_support": True,
+                "natural_voice_synthesis": True,
+                "conversation_memory": True
             },
             "agents_available": agent_manager.get_available_agents() if AGENT_MANAGER_AVAILABLE and agent_manager else [],
             "search_locations": file_manager.search_locations,
@@ -878,12 +961,60 @@ async def get_config():
                 "fastapi_host": getattr(config, 'FASTAPI_HOST', '0.0.0.0'),
                 "fastapi_port": getattr(config, 'FASTAPI_PORT', 8000),
                 "agent_temperature": getattr(config, 'AGENT_TEMPERATURE', 0.1),
-                "max_response_tokens": getattr(config, 'MAX_RESPONSE_TOKENS', 1000)
+                "max_response_tokens": getattr(config, 'MAX_RESPONSE_TOKENS', 1000),
+                "tts_engine": getattr(config, 'TTS_ENGINE', 'edge'),
+                "voice_feedback_enabled": getattr(config, 'ENABLE_VOICE_FEEDBACK', True)
             }
         
         return config_info
     except Exception as e:
         logger.error(f"Error getting config: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/conversation/history")
+async def get_conversation_history(user_id: str = "default_user", limit: int = 50):
+    """Get conversation history for user"""
+    try:
+        if CONVERSATIONAL_AI_AVAILABLE and conversation_memory:
+            history = await conversation_memory.get_conversation_history(user_id, limit)
+            return {
+                "success": True,
+                "history": history,
+                "count": len(history),
+                "user_id": user_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Conversation memory not available",
+                "history": [],
+                "count": 0
+            }
+    except Exception as e:
+        logger.error(f"Error getting conversation history: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/conversation/analytics")
+async def get_conversation_analytics(user_id: str = "default_user"):
+    """Get conversation analytics for user"""
+    try:
+        if CONVERSATIONAL_AI_AVAILABLE and conversation_memory:
+            analytics = await conversation_memory.get_conversation_analytics(user_id)
+            return {
+                "success": True,
+                "analytics": analytics,
+                "user_id": user_id,
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "success": False,
+                "message": "Conversation analytics not available",
+                "analytics": {}
+            }
+    except Exception as e:
+        logger.error(f"Error getting analytics: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # WebSocket Manager
@@ -902,16 +1033,22 @@ class WebSocketManager:
     
     async def send_message(self, websocket: WebSocket, message: dict):
         try:
-            await websocket.send_text(json.dumps(message))
+            # Convert message to JSON serializable format
+            serializable_message = json_serializable(message)
+            await websocket.send_text(json.dumps(serializable_message))
         except Exception as e:
             logger.error(f"❌ Error sending WebSocket message: {e}")
             self.disconnect(websocket)
     
     async def broadcast(self, message: dict):
         disconnected = set()
+        # Convert message to JSON serializable format
+        serializable_message = json_serializable(message)
+        message_text = json.dumps(serializable_message)
+        
         for connection in self.active_connections.copy():
             try:
-                await connection.send_text(json.dumps(message))
+                await connection.send_text(message_text)
             except Exception:
                 disconnected.add(connection)
         

@@ -18,6 +18,20 @@ from config import config
 from agents.agent_manager import agent_manager
 from utils.enhanced_speech_processor import enhanced_speech_processor
 
+# JSON serialization helper function
+def json_serializable(obj):
+    """Convert objects to JSON serializable format"""
+    if isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {k: json_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [json_serializable(item) for item in obj]
+    elif hasattr(obj, '__dict__'):
+        return json_serializable(obj.__dict__)
+    else:
+        return obj
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -298,16 +312,22 @@ class WebSocketManager:
     
     async def send_message(self, websocket: WebSocket, message: dict):
         try:
-            await websocket.send_text(json.dumps(message))
+            # Convert message to JSON serializable format
+            serializable_message = json_serializable(message)
+            await websocket.send_text(json.dumps(serializable_message))
         except Exception as e:
             logger.error(f"❌ Error sending WebSocket message: {e}")
             self.disconnect(websocket)
     
     async def broadcast(self, message: dict):
         disconnected = set()
+        # Convert message to JSON serializable format
+        serializable_message = json_serializable(message)
+        message_text = json.dumps(serializable_message)
+        
         for connection in self.active_connections.copy():
             try:
-                await connection.send_text(json.dumps(message))
+                await connection.send_text(message_text)
             except Exception:
                 disconnected.add(connection)
         

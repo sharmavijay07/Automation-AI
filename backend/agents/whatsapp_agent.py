@@ -107,33 +107,45 @@ class WhatsAppAgent:
                 # First try regex-based parsing for common patterns
                 import re
                 
-                # Pattern 1: "WhatsApp to [name] [message]"
-                pattern1 = r'(?:send\s+)?whatsapp\s+to\s+(\w+)\s+(.+)'
+                # Pattern 1: "[Send] WhatsApp [message] to [name] [rest of message]"
+                pattern1 = r'(?:send\s+)?whatsapp\s+(?:message\s+)?to\s+(\w+)\s+(.+)'
                 match1 = re.search(pattern1, user_input, re.IGNORECASE)
                 
                 # Pattern 2: "[Send] WhatsApp to [name]: [message]"
-                pattern2 = r'(?:send\s+)?whatsapp\s+to\s+(\w+)\s*:?\s*(.+)'
+                pattern2 = r'(?:send\s+)?whatsapp\s+to\s+(\w+)\s*:\s*(.+)'
                 match2 = re.search(pattern2, user_input, re.IGNORECASE)
                 
-                # Pattern 3: "Message [name] [message]"
-                pattern3 = r'(?:send\s+)?message\s+(\w+)\s+(.+)'
+                # Pattern 3: "Send WhatsApp message to [name] [message]" (more specific)
+                pattern3 = r'send\s+whatsapp\s+message\s+to\s+(\w+)\s+(.+)'
                 match3 = re.search(pattern3, user_input, re.IGNORECASE)
                 
-                # Pattern 4: "Text [name] [message]"
-                pattern4 = r'(?:send\s+)?text\s+(\w+)\s+(.+)'
+                # Pattern 4: "Message [name] [message]"
+                pattern4 = r'(?:send\s+)?message\s+(\w+)\s+(.+)'
                 match4 = re.search(pattern4, user_input, re.IGNORECASE)
+                
+                # Pattern 5: "Text [name] [message]"
+                pattern5 = r'(?:send\s+)?text\s+(\w+)\s+(.+)'
+                match5 = re.search(pattern5, user_input, re.IGNORECASE)
                 
                 recipient = None
                 message = None
                 
-                if match1:
-                    recipient, message = match1.groups()
+                # Check patterns in order of specificity
+                if match3:  # Most specific first
+                    recipient, message = match3.groups()
+                    print(f"[DEBUG] Pattern 3 match: {recipient} -> {message}")
                 elif match2:
                     recipient, message = match2.groups()
-                elif match3:
-                    recipient, message = match3.groups()
+                    print(f"[DEBUG] Pattern 2 match: {recipient} -> {message}")
+                elif match1:
+                    recipient, message = match1.groups()
+                    print(f"[DEBUG] Pattern 1 match: {recipient} -> {message}")
                 elif match4:
                     recipient, message = match4.groups()
+                    print(f"[DEBUG] Pattern 4 match: {recipient} -> {message}")
+                elif match5:
+                    recipient, message = match5.groups()
+                    print(f"[DEBUG] Pattern 5 match: {recipient} -> {message}")
                 
                 if recipient and message:
                     state['parsed_command'] = {

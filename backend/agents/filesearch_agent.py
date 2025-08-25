@@ -54,6 +54,12 @@ class FileSearchTool(BaseTool):
         system = platform.system().lower()
         locations = []
         
+        # Add project test files directory
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        test_files_dir = os.path.join(project_root, 'test_files')
+        if os.path.exists(test_files_dir):
+            locations.append(test_files_dir)
+        
         if system == "windows":
             # Windows search locations
             user_profile = os.environ.get('USERPROFILE', '')
@@ -153,11 +159,16 @@ class FileSearchTool(BaseTool):
         results = []
         query_clean = query.strip()
         
+        print(f"[DEBUG] FileSearch: Searching for '{query_clean}'")
+        print(f"[DEBUG] FileSearch: Search locations: {self.search_locations}")
+        
         if not query_clean:
+            print(f"[DEBUG] FileSearch: Empty query, returning no results")
             return []
         
         # Search in all locations
         for location in self.search_locations:
+            print(f"[DEBUG] FileSearch: Searching in {location}")
             try:
                 # Search with different patterns
                 patterns = [
@@ -170,7 +181,9 @@ class FileSearchTool(BaseTool):
                 for pattern in patterns:
                     try:
                         search_pattern = os.path.join(location, '**', pattern)
+                        print(f"[DEBUG] FileSearch: Pattern: {search_pattern}")
                         matches = glob.glob(search_pattern, recursive=True)
+                        print(f"[DEBUG] FileSearch: Found {len(matches)} matches for pattern {pattern}")
                         
                         for match in matches:
                             if os.path.isfile(match):
@@ -178,15 +191,18 @@ class FileSearchTool(BaseTool):
                                 match_score = self._fuzzy_match(query_clean, file_info.name)
                                 
                                 if match_score > 0:
+                                    print(f"[DEBUG] FileSearch: Match found: {file_info.name} (score: {match_score})")
                                     results.append({
                                         "file_info": file_info.dict(),
                                         "match_score": match_score,
                                         "location": location
                                     })
-                    except Exception:
+                    except Exception as e:
+                        print(f"[DEBUG] FileSearch: Pattern error: {str(e)}")
                         continue
                         
-            except Exception:
+            except Exception as e:
+                print(f"[DEBUG] FileSearch: Location error for {location}: {str(e)}")
                 continue
         
         # Sort by match score and remove duplicates
@@ -198,7 +214,13 @@ class FileSearchTool(BaseTool):
         
         # Sort by score and limit results
         sorted_results = sorted(unique_results.values(), key=lambda x: x["match_score"], reverse=True)
-        return sorted_results[:max_results]
+        final_results = sorted_results[:max_results]
+        
+        print(f"[DEBUG] FileSearch: Final results: {len(final_results)} files")
+        for result in final_results:
+            print(f"[DEBUG] FileSearch: - {result['file_info']['name']} (score: {result['match_score']})")
+        
+        return final_results
 
 class FileOpenTool(BaseTool):
     """Cross-platform file opening tool"""

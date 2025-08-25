@@ -51,17 +51,27 @@ export function useCrewAI() {
   // Handle WebSocket messages
   useEffect(() => {
     if (lastJsonMessage) {
+      console.log('📬 WebSocket message received:', lastJsonMessage);
+      
       const message = lastJsonMessage as any;
       
       if (message.type === 'command_result') {
+        console.log('📦 Processing command result:', message.data);
+        
         const resultData = message.data;
         // Ensure agents_involved is always an array
         if (!resultData.agents_involved) {
           resultData.agents_involved = [];
         }
+        
+        console.log('✅ Converted WebSocket result:', resultData);
+        console.log('🔍 WhatsApp URL in result:', resultData.whatsapp_url);
+        console.log('🔍 Results object:', resultData.results);
+        
         setLastResult(resultData);
         setIsProcessing(false);
       } else if (message.type === 'pong') {
+        console.log('🏠 Backend pong received - connection healthy');
         setBackendStatus('online');
       }
     }

@@ -1,0 +1,12 @@
+OWNERSHIP DOCUMENT
+==================
+
+This is a sample ownership document for testing the AI assistant file search functionality.
+
+Property Details:
+- Location: Test Address  
+- Owner: Test Owner
+- Document Type: Ownership Certificate
+- Date: 2024
+
+This file is created for testing multi-agent workflows.

@@ -12,6 +12,8 @@ from agents.whatsapp_agent import whatsapp_agent
 from agents.conversation_agent import conversation_agent
 from agents.filesearch_agent import filesearch_agent
 from config import config
+from utils.conversation_memory import conversation_memory
+from utils.conversational_tts import conversational_tts
 
 class AgentManagerState(TypedDict):
     """State for the agent manager workflow"""
@@ -72,12 +74,16 @@ class AgentManager:
                 print(f"[DEBUG] Is conversational: {is_conversational}")
                 
                 # Enhanced keyword detection with NLP patterns
-                file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music"]
-                whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform", "send whatsapp", "whatsapp to", "message to"]
+                file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music", "ownership", "report", "presentation"]
+                whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform", "send whatsapp", "whatsapp to", "message to", "share"]
                 
                 # Multi-agent detection (file + communication)
                 has_file_intent = any(keyword in user_input_lower for keyword in file_keywords)
                 has_whatsapp_intent = any(keyword in user_input_lower for keyword in whatsapp_keywords)
+                
+                # Special handling for multi-agent patterns
+                multi_agent_patterns = ["send * to", "share * with", "find * and send", "send the * file"]
+                is_multi_agent_command = any("send" in user_input_lower and keyword in user_input_lower for keyword in file_keywords)
                 
                 # Special handling for WhatsApp patterns
                 whatsapp_patterns = ["send whatsapp", "whatsapp to", "message to", "text to"]
@@ -86,17 +92,20 @@ class AgentManager:
                 print(f"[DEBUG] Has file intent: {has_file_intent}")
                 print(f"[DEBUG] Has WhatsApp intent: {has_whatsapp_intent}")
                 print(f"[DEBUG] Is WhatsApp command: {is_whatsapp_command}")
+                print(f"[DEBUG] Is multi-agent command: {is_multi_agent_command}")
                 
-                # Priority routing: WhatsApp commands override conversational detection
-                if is_whatsapp_command or has_whatsapp_intent:
-                    if has_file_intent:
-                        state['detected_intent'] = "multi_agent"
-                        state['agent_name'] = "multi_agent"
-                        print(f"[DEBUG] Routed to: multi_agent (file + whatsapp)")
-                    else:
-                        state['detected_intent'] = "whatsapp"
-                        state['agent_name'] = "whatsapp"
-                        print(f"[DEBUG] Routed to: whatsapp")
+                # Priority routing: Multi-agent commands first
+                if is_multi_agent_command or (has_file_intent and has_whatsapp_intent):
+                    state['detected_intent'] = "multi_agent"
+                    state['agent_name'] = "multi_agent"
+                    print(f"[DEBUG] Routed to: multi_agent (file + whatsapp)")
+                    return state
+                
+                # WhatsApp commands override conversational detection
+                elif is_whatsapp_command or (has_whatsapp_intent and not has_file_intent):
+                    state['detected_intent'] = "whatsapp"
+                    state['agent_name'] = "whatsapp"
+                    print(f"[DEBUG] Routed to: whatsapp")
                     return state
                 
                 # File operations
@@ -126,25 +135,30 @@ class AgentManager:
                   
                 - filesearch: File operations, search, open, and sharing
                   * Patterns: "find file", "open document", "search for", "locate", "show me files"
-                  * Natural: "where is my report", "open that presentation", "find my photos", "send file to someone"
+                  * Natural: "where is my report", "open that presentation", "find my photos"
                   
                 - conversation: Conversational interactions, greetings, help
                   * Patterns: "hello", "help", "what can you do", "who are you", "thanks"
                   * Natural: "hi there", "I need help", "goodbye", "thank you"
                   
-                - multi_agent: Complex tasks requiring multiple agents
+                - multi_agent: Complex tasks requiring multiple agents (FILE + COMMUNICATION)
                   * Patterns: "send [file] to [contact]", "find and share", "search and message"
                   * Natural: "send my report to boss on whatsapp", "find photo and share with mom"
+                  * Key indicators: file words + communication words together
                 
                 CLASSIFICATION RULES:
-                1. If mentioning files AND communication -> multi_agent
-                2. If clear WhatsApp/messaging intent -> whatsapp  
-                3. If clear file operation intent -> filesearch
-                4. If conversational/greeting -> conversation
-                5. If unclear -> conversation (Vaani will ask for clarification)
+                1. If command contains BOTH file operations AND communication -> multi_agent
+                2. If contains file words (document, file, report, ownership, photo, etc.) AND send/share/message words -> multi_agent
+                3. If clear WhatsApp/messaging intent only -> whatsapp  
+                4. If clear file operation intent only -> filesearch
+                5. If conversational/greeting -> conversation
+                6. If unclear -> conversation (Vaani will ask for clarification)
                 
                 Examples:
                 - "Send report.pdf to boss on WhatsApp" -> multi_agent
+                - "Send the ownership file to jay" -> multi_agent (file + send)
+                - "Find ownership document and send to jay" -> multi_agent
+                - "Share my presentation with team" -> multi_agent
                 - "Tell Sarah I'm running late" -> whatsapp
                 - "Find my Excel files" -> filesearch
                 - "Open presentation.pptx" -> filesearch
@@ -263,6 +277,20 @@ class AgentManager:
     def _handle_multi_agent_workflow(self, user_input: str) -> Dict[str, Any]:
         """Handle complex workflows requiring multiple agents"""
         try:
+            # For simple WhatsApp messages without file operations, route directly to WhatsApp agent
+            user_input_lower = user_input.lower()
+            file_terms = ["ownership", "document", "file", "report", "presentation", "photo", "video", "pdf", "doc"]
+            has_file_intent = any(term in user_input_lower for term in file_terms)
+            
+            print(f"[DEBUG] Multi-agent workflow called for: {user_input}")
+            print(f"[DEBUG] Has file intent: {has_file_intent}")
+            
+            # If it's just a WhatsApp message without file operations, delegate to WhatsApp agent
+            if not has_file_intent and any(pattern in user_input_lower for pattern in ["send whatsapp", "whatsapp to", "message to"]):
+                print(f"[DEBUG] Multi-agent delegating to WhatsApp agent: {user_input}")
+                whatsapp_result = self.agents["whatsapp"].process_command(user_input)
+                return whatsapp_result
+            
             # First, try to parse the multi-agent intent
             system_prompt = """Analyze this command to determine the multi-agent workflow needed:
             
@@ -270,17 +298,25 @@ class AgentManager:
             1. file_to_whatsapp: Find/prepare file and send via WhatsApp
             2. search_and_share: Search for files and prepare for sharing
             3. open_and_inform: Open file and notify someone
+            4. whatsapp_only: Simple WhatsApp message without files
             
             Extract:
-            - workflow_type: [file_to_whatsapp/search_and_share/open_and_inform]
-            - file_query: [file name/pattern to find]
-            - recipient: [person to send to]
+            - workflow_type: [file_to_whatsapp/search_and_share/open_and_inform/whatsapp_only]
+            - file_query: [file name/pattern to find] (empty if no file)
+            - recipient: [person to send to] (NEVER extract 'to', 'for', or prepositions)
             - message: [optional message content]
+            
+            IMPORTANT: For recipient extraction, identify the actual person's name:
+            - "send WhatsApp message to Jay lion is coming" -> recipient: "Jay", message: "lion is coming"
+            - "send report.pdf to boss" -> recipient: "boss", file: "report.pdf"
+            - "message mom about dinner" -> recipient: "mom", message: "about dinner"
+            
+            NEVER extract prepositions (to, for, with, about) as recipient names.
             
             Examples:
             - "Send report.pdf to boss on WhatsApp" -> file_to_whatsapp, report.pdf, boss
             - "Find my photos and share with mom" -> search_and_share, photos, mom
-            - "Open presentation and tell team it's ready" -> open_and_inform, presentation, team
+            - "Send WhatsApp message to Jay lion is coming" -> whatsapp_only, (empty), Jay, lion is coming
             
             Return format:
             WORKFLOW: [type]
@@ -297,6 +333,8 @@ class AgentManager:
             response = self.llm.invoke(messages)
             response_text = response.content.strip()
             
+            print(f"[DEBUG] LLM parsing response: {response_text}")
+            
             # Parse workflow parameters
             workflow_type = ""
             file_query = ""
@@ -310,22 +348,126 @@ class AgentManager:
                     file_query = line.replace("FILE:", "").strip()
                 elif line.startswith("RECIPIENT:"):
                     recipient = line.replace("RECIPIENT:", "").strip()
+                    # Additional validation to prevent extracting prepositions
+                    if recipient.lower() in ["to", "for", "with", "about", "from", "the", "a", "an"]:
+                        print(f"[DEBUG] Ignoring invalid recipient: {recipient}")
+                        recipient = ""
                 elif line.startswith("MESSAGE:"):
                     message = line.replace("MESSAGE:", "").strip()
+            
+            print(f"[DEBUG] Parsed - Workflow: {workflow_type}, File: {file_query}, Recipient: {recipient}, Message: {message}")
             
             # Execute the multi-agent workflow
             if workflow_type == "file_to_whatsapp" and file_query and recipient:
                 return self._execute_file_to_whatsapp_workflow(file_query, recipient, message)
             elif workflow_type == "search_and_share" and file_query:
                 return self._execute_search_and_share_workflow(file_query, recipient)
+            elif workflow_type == "whatsapp_only" and recipient:
+                # For simple WhatsApp messages, delegate to WhatsApp agent
+                whatsapp_command = f"Send WhatsApp to {recipient}: {message}" if message else f"Send WhatsApp to {recipient}"
+                print(f"[DEBUG] Multi-agent creating WhatsApp command: {whatsapp_command}")
+                whatsapp_result = self.agents["whatsapp"].process_command(whatsapp_command)
+                return whatsapp_result
             else:
-                # Fallback: try to handle as best as possible
+                # Fallback to generic workflow
                 return self._execute_generic_multi_agent_workflow(user_input)
                 
         except Exception as e:
             return {
                 "success": False,
-                "message": f"Hi! I'm Vaani. I had trouble understanding that complex request. Could you try breaking it down? For example: 'Find my report' first, then 'Send report.pdf to boss on WhatsApp'.",
+                "message": f"Hi! I'm Vaani. I had trouble understanding that multi-agent request. Error: {str(e)}",
+                "workflow": "multi_agent_error",
+                "error": str(e)
+            }
+    
+    def _execute_generic_multi_agent_workflow(self, user_input: str) -> Dict[str, Any]:
+        """Execute generic multi-agent workflow when pattern isn't clear"""
+        try:
+            # Use LLM to understand what the user wants and execute it
+            system_prompt = """You are Vaani, an AI assistant that executes tasks directly.
+            
+            The user gave a command that involves multiple actions. Analyze it and execute the appropriate workflow:
+            
+            AVAILABLE ACTIONS:
+            1. Find/search files: Use filesearch agent
+            2. Send WhatsApp messages: Use whatsapp agent 
+            3. Combined file + messaging: Execute both in sequence
+            
+            EXECUTION APPROACH:
+            - Don't ask for clarification - execute what makes the most sense
+            - If file mentioned, try to find it first
+            - If messaging mentioned, create WhatsApp message
+            - If both, do file search then messaging
+            
+            Parse this command and determine the best execution path:
+            """
+            
+            messages = [
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_input)
+            ]
+            
+            response = self.llm.invoke(messages)
+            analysis = response.content.strip()
+            
+            # Try to extract file and recipient info from the original command
+            user_input_lower = user_input.lower()
+            
+            # Extract potential file references
+            file_terms = ["ownership", "document", "file", "report", "presentation", "photo", "video", "pdf", "doc"]
+            mentioned_files = [term for term in file_terms if term in user_input_lower]
+            
+            # Extract potential recipients (improved logic to avoid extracting prepositions)
+            words = user_input.split()
+            potential_recipients = []
+            for i, word in enumerate(words):
+                if word.lower() in ["to", "for"] and i + 1 < len(words):
+                    next_word = words[i + 1]
+                    # Skip common words that aren't names
+                    if next_word.lower() not in ["the", "a", "an", "my", "your", "his", "her", "their", "our", "whatsapp", "message", "file"]:
+                        potential_recipients.append(next_word)
+            
+            print(f"[DEBUG] Generic multi-agent - Files: {mentioned_files}, Recipients: {potential_recipients}")
+            
+            # If we found file references and recipients, execute file-to-whatsapp workflow
+            if mentioned_files and potential_recipients:
+                file_query = mentioned_files[0]
+                recipient = potential_recipients[0]
+                return self._execute_file_to_whatsapp_workflow(file_query, recipient)
+            
+            # If only file mentioned, do file search
+            elif mentioned_files:
+                file_result = self.agents["filesearch"].process_command(f"find {mentioned_files[0]}")
+                if file_result.get("success"):
+                    return {
+                        "success": True,
+                        "message": f"✅ Found files related to '{mentioned_files[0]}'! {file_result.get('message', '')}",
+                        "workflow": "file_search",
+                        "file_results": file_result.get("search_results", [])
+                    }
+                else:
+                    return {
+                        "success": False,
+                        "message": f"🔍 I couldn't find any files related to '{mentioned_files[0]}'. Could you be more specific?",
+                        "workflow": "file_search_failed"
+                    }
+            
+            # If messaging intent detected, handle as WhatsApp
+            elif any(word in user_input_lower for word in ["send", "message", "tell", "whatsapp"]):
+                print(f"[DEBUG] Generic multi-agent delegating to WhatsApp: {user_input}")
+                whatsapp_result = self.agents["whatsapp"].process_command(user_input)
+                return whatsapp_result
+            
+            # Fallback - execute direct action instead of giving guidance
+            else:
+                # Instead of generic guidance, try to execute the most likely action
+                return self.agents["conversation"].process_conversation(user_input)
+                
+        except Exception as e:
+            return {
+                "success": False,
+                "message": f"Hi! I'm Vaani. I had trouble with that request. Could you try rephrasing it? Error: {str(e)}",
+                "workflow": "generic_error",
                 "error": str(e)
             }
     
@@ -425,14 +567,6 @@ class AgentManager:
                 "workflow": "search_and_share",
                 "error": str(e)
             }
-    
-    def _execute_generic_multi_agent_workflow(self, user_input: str) -> Dict[str, Any]:
-        """Generic handler for complex requests"""
-        return {
-            "success": True,
-            "message": "Hi! I'm Vaani. That sounds like a complex task! I can help with:\n\n📱 WhatsApp: 'Send message to [contact]'\n📁 Files: 'Find [filename]' or 'Open [filename]'\n🔄 Combined: 'Send [filename] to [contact] on WhatsApp'\n\nWhat would you like me to help you with first?",
-            "workflow": "generic_guidance"
-        }
     
     def process_command(self, user_input: str) -> Dict[str, Any]:
         """Process user command through MCP workflow"""

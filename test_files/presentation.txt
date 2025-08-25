@@ -1,0 +1,13 @@
+PRESENTATION CONTENT
+===================
+
+Sample presentation for AI assistant testing.
+
+Slides:
+1. Introduction to AI Task Automation
+2. Multi-Agent Architecture  
+3. Voice Recognition Features
+4. File Management Capabilities
+5. WhatsApp Integration
+
+This file tests presentation search functionality.

@@ -12,7 +12,9 @@ import {
   Sparkles,
   Settings,
   Wifi,
-  WifiOff
+  WifiOff,
+  History,
+  X
 } from 'lucide-react';
 import useVoiceRecognition from '@/hooks/useVoiceRecognition';
 import { useCrewAI } from '@/hooks/useCrewAI';
@@ -27,6 +29,13 @@ export default function CrewAIPage() {
   const [showResults, setShowResults] = useState(false);
   const [showWhatsAppPopup, setShowWhatsAppPopup] = useState(false);
   const [isManuallyClosing, setIsManuallyClosing] = useState(false);
+  const [conversationHistory, setConversationHistory] = useState<Array<{
+    timestamp: Date;
+    type: 'user' | 'vaani';
+    message: string;
+    result?: any;
+  }>>([]);
+  const [showHistory, setShowHistory] = useState(false);
   
   const {
     backendStatus,
@@ -38,7 +47,7 @@ export default function CrewAIPage() {
     clearResult
   } = useCrewAI();
   
-  const { playSound } = useSound();
+  const { playSound, speak, stopSpeaking } = useSound();
   const { isListening: voiceListening, startVoiceRecognition } = useVoiceRecognition();
   
   useEffect(() => {
@@ -47,150 +56,227 @@ export default function CrewAIPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Handle WebSocket results for voice commands
+  // Handle WebSocket results with natural conversation flow
   useEffect(() => {
     if (lastResult && !isProcessing && !isManuallyClosing) {
-      console.log('🔄 Processing result:', lastResult);
+      console.log('🔄 Processing result naturally:', lastResult);
       
-      // Only auto-show results if they're from WebSocket (not from manual actions)
-      // We can tell because WebSocket results come when not processing
-      if (!showResults) {
-        setShowResults(true);
-        
-        // Show WhatsApp popup for successful WhatsApp agent operations
-        // Check multiple conditions to ensure it's actually a successful WhatsApp operation
-        const isSuccessfulWhatsAppResult = lastResult.success && 
-          (lastResult.agent_used?.toLowerCase().includes('whatsapp') ||
-           lastResult.intent?.toLowerCase().includes('whatsapp')) &&
-          !lastResult.error && // Ensure no error occurred
-          (lastResult.whatsapp_url || lastResult.message?.includes('wa.me')); // Ensure we have a WhatsApp URL
-           
-        console.log('🔍 WhatsApp result check:', {
-          success: lastResult.success,
-          agent_used: lastResult.agent_used,
-          intent: lastResult.intent,
-          has_error: !!lastResult.error,
-          has_whatsapp_url: !!lastResult.whatsapp_url,
-          message_includes_wa_me: lastResult.message?.includes('wa.me'),
-          isSuccessfulWhatsAppResult,
-          isManuallyClosing
-        });
-        
-        if (isSuccessfulWhatsAppResult) {
-          console.log('✅ Triggering WhatsApp popup in 1.5 seconds');
-          setTimeout(() => {
-            setShowWhatsAppPopup(true);
-          }, 1500); // Show after 1.5 seconds
-        }
-        
-        // Play appropriate sound
-        playSound(lastResult.success ? 'success' : 'error');
-      }
+      // Handle result naturally without intrusive popups
+      handleNaturalResult(lastResult);
     }
     
     // Reset manual closing flag after processing
     if (isManuallyClosing) {
       const timer = setTimeout(() => {
         setIsManuallyClosing(false);
-      }, 500); // Wait 500ms to ensure modal close animation completes
+      }, 500);
       return () => clearTimeout(timer);
     }
-  }, [lastResult, isProcessing, playSound, showResults, isManuallyClosing]);
+  }, [lastResult, isProcessing, isManuallyClosing]);
+
+  // Add conversation entry to history
+  const addToHistory = (type: 'user' | 'vaani', message: string, result?: any) => {
+    setConversationHistory(prev => [...prev, {
+      timestamp: new Date(),
+      type,
+      message,
+      result
+    }]);
+  };
+
+  // Handle results with natural conversation flow
+  const handleNaturalResult = async (result: any, userCommand?: string) => {
+    if (!result) return;
+    
+    console.log('🗣️ Natural conversation handling:', result);
+    console.log('🔍 Checking WhatsApp conditions:');
+    console.log('- result.success:', result.success);
+    console.log('- result.agent_used:', result.agent_used);
+    console.log('- result.intent:', result.intent);
+    console.log('- result.message contains whatsapp:', result.message?.toLowerCase().includes('whatsapp'));
+    console.log('- result.whatsapp_url:', result.whatsapp_url);
+    console.log('- result.results?.whatsapp_url:', result.results?.whatsapp_url);
+    
+    // Add user command to history if provided
+    if (userCommand) {
+      addToHistory('user', userCommand);
+    }
+    
+    // Add Vaani's response to history
+    const cleanMessage = result.message
+      ?.replace(/[📱📁🔄✅❌🔍💬📄🎤💡]/g, '') // Remove emojis
+      ?.replace(/\n/g, ' ') // Replace newlines with spaces
+      ?.replace(/\s+/g, ' ') // Normalize whitespace
+      ?.trim();
+    
+    if (cleanMessage) {
+      addToHistory('vaani', cleanMessage, result);
+    }
+    
+    // Handle WhatsApp actions naturally (backend already spoke)
+    const isRealWhatsAppAction = result.success && (
+      (result.agent_used?.toLowerCase().includes('whatsapp') && result.agent_used !== 'conversation') ||
+      (result.intent?.toLowerCase().includes('whatsapp') && result.intent !== 'conversation') ||
+      result.whatsapp_url ||
+      result.results?.whatsapp_url ||
+      result.results?.agent_response?.whatsapp_url ||
+      (result.message?.toLowerCase().includes('whatsapp') && (
+        result.message.includes('wa.me') ||
+        result.message.includes('whatsapp.com') ||
+        result.message.includes('message prepared') ||
+        result.message.includes('ready to send')
+      ))
+    );
+    
+    if (isRealWhatsAppAction) {
+      console.log('📱 Genuine WhatsApp action detected! Setting up automatic opening...');
+      // Direct WhatsApp opening without popup interruption
+      setTimeout(() => {
+        console.log('🚀 Executing WhatsApp opening after 1.5s delay...');
+        shareToWhatsApp();
+      }, 1500); // Brief delay to let Vaani finish speaking
+    } else {
+      console.log('⚠️ No genuine WhatsApp action detected. Result type:', result.intent, 'Agent:', result.agent_used);
+    }
+    
+    // For file operations and other tasks, just add to history
+    // Backend TTS already handles speaking
+    
+    console.log(`📝 Added to conversation history: "${cleanMessage}"`);
+  };
 
   const handleVoiceStart = async () => {
     if (backendStatus !== 'online') return;
     
+    // Stop any current speech and play start sound
+    stopSpeaking();
     playSound('start');
     
     // Use real voice recognition
     startVoiceRecognition(
       async (transcript: string) => {
-        console.log('Voice transcript received:', transcript);
+        console.log('🎤 Voice transcript received:', transcript);
+        addToHistory('user', transcript);
+        
+        // Immediate acknowledgment - brief and natural
+        speak("Got it!");
+        
         playSound('processing');
         
-        // Show visual feedback that we're processing
-        console.log('✅ Processing command:', transcript);
-        
-        // Process the voice command (WebSocket will handle the result via useEffect)
+        // Process the voice command immediately
+        console.log('✅ Processing natural command:', transcript);
         await executeCommand(transcript);
       },
       (message: string) => {
-        console.log('🎤 Voice feedback:', message);
-        // Show visual feedback to user (could be enhanced with toast notifications)
+        console.log('🎤 Voice system:', message);
+        // Voice system feedback - keep minimal
       }
     );
   };
 
   const handleAgentSelect = async (agentType: string, command: string) => {
     setCurrentAgent(agentType);
+    
+    // Add to history and acknowledge
+    addToHistory('user', command);
+    speak("I'll help you with that right away.");
+    
     const result = await executeWorkflow(agentType, { command });
     if (result) {
-      setShowResults(true);
-      
-      // Show WhatsApp popup for successful WhatsApp operations from manual agent selection
-      const isSuccessfulWhatsAppResult = result.success && 
-        (result.agent_used?.toLowerCase().includes('whatsapp') ||
-         result.intent?.toLowerCase().includes('whatsapp')) &&
-        !result.error && // Ensure no error occurred
-        (result.whatsapp_url || result.message?.includes('wa.me')); // Ensure we have a WhatsApp URL
-        
-      if (isSuccessfulWhatsAppResult) {
-        setTimeout(() => {
-          setShowWhatsAppPopup(true);
-        }, 1500);
-      }
+      handleNaturalResult(result, command);
     }
   };
 
   const shareToWhatsApp = async () => {
     if (!lastResult) return;
     
-    // Extract WhatsApp link from the result message using regex pattern
-    const whatsappLinkMatch = lastResult.message.match(/https:\/\/wa\.me\/[^\s]+/);
-    if (whatsappLinkMatch) {
-      // Use the existing WhatsApp link directly
-      const whatsappLink = whatsappLinkMatch[0];
-      setShowWhatsAppPopup(false);
-      window.open(whatsappLink, '_blank');
-    } else {
-      // Fallback: try to extract phone number and message text separately
-      const phoneMatch = lastResult.message.match(/wa\.me\/([+]?[0-9]+)/);
-      const textMatch = lastResult.message.match(/text=([^&\s]+)/);
-      
-      if (phoneMatch && textMatch) {
-        const phoneNumber = phoneMatch[1];
-        const messageText = decodeURIComponent(textMatch[1]);
-        const encodedPhone = encodeURIComponent(phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber);
-        const encodedMessage = encodeURIComponent(messageText);
-        const whatsappUrl = `https://api.whatsapp.com/send/?phone=${encodedPhone}&text=${encodedMessage}&type=phone_number&app_absent=0`;
-        setShowWhatsAppPopup(false);
-        window.open(whatsappUrl, '_blank');
-      } else {
-        // Final fallback - ask backend
-        try {
-          const response = await fetch('http://localhost:8000/process-command', {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              command: `Open WhatsApp link from: ${lastResult.message}`
-            })
-          });
-          
-          if (response.ok) {
-            const linkResult = await response.json();
-            if (linkResult.success && linkResult.details && linkResult.details.whatsapp_link) {
-              window.open(linkResult.details.whatsapp_link, '_blank');
-            }
-          }
-          setShowWhatsAppPopup(false);
-        } catch (error) {
-          setShowWhatsAppPopup(false);
-          console.error('Could not open WhatsApp link:', error);
-        }
+    console.log('📱 Attempting to open WhatsApp link from result:', lastResult);
+    
+    let whatsappUrl = null;
+    
+    // Priority 1: Check direct whatsapp_url field
+    if (lastResult.whatsapp_url) {
+      whatsappUrl = lastResult.whatsapp_url;
+      console.log('✅ Found WhatsApp URL in whatsapp_url field:', whatsappUrl);
+    }
+    // Priority 2: Check results.whatsapp_url
+    else if (lastResult.results?.whatsapp_url) {
+      whatsappUrl = lastResult.results.whatsapp_url;
+      console.log('✅ Found WhatsApp URL in results.whatsapp_url:', whatsappUrl);
+    }
+    // Priority 3: Check results.agent_response.whatsapp_url
+    else if (lastResult.results?.agent_response?.whatsapp_url) {
+      whatsappUrl = lastResult.results.agent_response.whatsapp_url;
+      console.log('✅ Found WhatsApp URL in agent_response:', whatsappUrl);
+    }
+    // Priority 4: Extract from message text
+    else if (lastResult.message) {
+      const whatsappLinkMatch = lastResult.message.match(/https:\/\/(api\.whatsapp\.com\/send|wa\.me)\/[^\s]+/i);
+      if (whatsappLinkMatch) {
+        whatsappUrl = whatsappLinkMatch[0];
+        console.log('✅ Extracted WhatsApp URL from message:', whatsappUrl);
       }
     }
+    
+    // If we found a WhatsApp URL, open it directly
+    if (whatsappUrl) {
+      console.log('🚀 Opening WhatsApp URL:', whatsappUrl);
+      setShowWhatsAppPopup(false);
+      window.open(whatsappUrl, '_blank');
+      return;
+    }
+    
+    // Fallback: Try to construct URL from phone and text patterns
+    const phoneMatch = lastResult.message?.match(/wa\.me\/([+]?[0-9]+)/);
+    const textMatch = lastResult.message?.match(/text=([^&\s]+)/);
+    
+    if (phoneMatch && textMatch) {
+      const phoneNumber = phoneMatch[1];
+      const messageText = decodeURIComponent(textMatch[1]);
+      const encodedPhone = encodeURIComponent(phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber);
+      const encodedMessage = encodeURIComponent(messageText);
+      whatsappUrl = `https://api.whatsapp.com/send/?phone=${encodedPhone}&text=${encodedMessage}&type=phone_number&app_absent=0`;
+      console.log('🔧 Constructed WhatsApp URL from parts:', whatsappUrl);
+      setShowWhatsAppPopup(false);
+      window.open(whatsappUrl, '_blank');
+      return;
+    }
+    
+    // Last resort: Ask backend to extract/generate link - but only if we have a clear WhatsApp message
+    if (lastResult.message && (
+      lastResult.message.toLowerCase().includes('wa.me') ||
+      lastResult.message.toLowerCase().includes('whatsapp.com') ||
+      lastResult.message.includes('+') // Likely contains a phone number
+    )) {
+      console.log('⚠️ No WhatsApp URL found, asking backend for help with potential WhatsApp content');
+      try {
+        const response = await fetch('http://localhost:8000/process-command', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            command: `Extract WhatsApp link from: ${lastResult.message.substring(0, 200)}` // Limit length
+          })
+        });
+        
+        if (response.ok) {
+          const linkResult = await response.json();
+          if (linkResult.success && linkResult.results?.whatsapp_url) {
+            console.log('✅ Backend provided WhatsApp URL:', linkResult.results.whatsapp_url);
+            window.open(linkResult.results.whatsapp_url, '_blank');
+          } else {
+            console.log('❌ Backend could not extract WhatsApp URL from message');
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error asking backend for WhatsApp link:', error);
+      }
+    } else {
+      console.log('❌ No WhatsApp-related content found in message - skipping backend fallback');
+    }
+    
+    setShowWhatsAppPopup(false);
   };
 
   const agents = [
@@ -255,6 +341,18 @@ export default function CrewAIPage() {
             status={backendStatus} 
             label="Backend" 
           />
+          <motion.button
+            whileHover={{ scale: 1.05 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setShowHistory(true)}
+            className="glass p-3 rounded-xl text-white hover:bg-white/20 transition-all relative"
+            title="View conversation history"
+          >
+            <History className="w-6 h-6" />
+            {conversationHistory.length > 0 && (
+              <div className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full" />
+            )}
+          </motion.button>
           <motion.button
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
@@ -400,22 +498,103 @@ export default function CrewAIPage() {
         </div>
       </motion.section>
       
-      {/* Results Display */}
+      {/* History Modal */}
       <AnimatePresence>
-        {showResults && lastResult && (
-          <ResultDisplay
-            result={lastResult}
-            onClose={() => {
-              console.log('🚪 Manually closing results display');
-              setIsManuallyClosing(true);
-              setShowResults(false);
-              setShowWhatsAppPopup(false); // Also close WhatsApp popup if open
-              // Clear the lastResult to prevent modal from reopening
-              setTimeout(() => {
-                clearResult();
-              }, 300); // Small delay to allow close animation
-            }}
-          />
+        {showHistory && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4"
+            onClick={() => setShowHistory(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 20 }}
+              transition={{ type: "spring", duration: 0.5 }}
+              className="bg-white rounded-2xl p-6 max-w-2xl w-full max-h-[80vh] mx-4 shadow-2xl relative overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-6">
+                <div className="flex items-center space-x-3">
+                  <div className="w-10 h-10 bg-gradient-to-r from-blue-500 to-purple-600 rounded-xl flex items-center justify-center">
+                    <History className="w-6 h-6 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-gray-900">Conversation History</h3>
+                    <p className="text-sm text-gray-500">{conversationHistory.length} interactions</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowHistory(false)}
+                  className="text-gray-400 hover:text-gray-600 transition-colors p-2 rounded-full hover:bg-gray-100"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+                    
+              {/* Conversation History */}
+              <div className="overflow-y-auto max-h-96 space-y-4">
+                {conversationHistory.length === 0 ? (
+                  <div className="text-center py-8 text-gray-500">
+                    <Bot className="w-12 h-12 mx-auto mb-3 text-gray-300" />
+                    <p>No conversations yet. Start talking to Vaani!</p>
+                  </div>
+                ) : (
+                  conversationHistory.map((entry, index) => (
+                    <div key={index} className={`flex ${entry.type === 'user' ? 'justify-end' : 'justify-start'}`}>
+                      <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-2xl ${
+                        entry.type === 'user' 
+                          ? 'bg-blue-500 text-white' 
+                          : 'bg-gray-100 text-gray-900'
+                      }`}>
+                        <div className="flex items-center space-x-2 mb-1">
+                          {entry.type === 'user' ? (
+                            <div className="w-4 h-4 bg-white/20 rounded-full" />
+                          ) : (
+                            <Bot className="w-4 h-4" />
+                          )}
+                          <span className="text-xs opacity-75">
+                            {entry.type === 'user' ? 'You' : 'Vaani'}
+                          </span>
+                          <span className="text-xs opacity-50">
+                            {entry.timestamp.toLocaleTimeString()}
+                          </span>
+                        </div>
+                        <p className="text-sm">{entry.message}</p>
+                        {entry.result?.agent_used && (
+                          <div className="mt-1 text-xs opacity-75">
+                            via {entry.result.agent_used} agent
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+                    
+              {/* Actions */}
+              <div className="mt-6 flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    setConversationHistory([]);
+                    setShowHistory(false);
+                  }}
+                  className="px-4 py-2 text-gray-600 hover:text-gray-800 transition-colors"
+                >
+                  Clear History
+                </button>
+                <button
+                  onClick={() => setShowHistory(false)}
+                  className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
         )}
       </AnimatePresence>
       

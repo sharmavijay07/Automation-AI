@@ -34,6 +34,23 @@ class Config:
     AGENT_TEMPERATURE: float = float(os.getenv("AGENT_TEMPERATURE", "0.1"))
     MAX_RESPONSE_TOKENS: int = int(os.getenv("MAX_RESPONSE_TOKENS", "1000"))
     
+    # MongoDB Configuration
+    MONGODB_URL: str = os.getenv("MONGODB_URL", "mongodb://localhost:27017")
+    MONGODB_DATABASE: str = os.getenv("MONGODB_DATABASE", "vaani_assistant")
+    
+    # Enhanced TTS Configuration (Free Services)
+    TTS_ENGINE: str = os.getenv("TTS_ENGINE", "edge")  # edge, coqui, pyttsx3, gtts, festival
+    VAANI_VOICE: str = os.getenv("VAANI_VOICE", "en-US-AriaNeural")  # Edge TTS voice
+    VAANI_VOICE_SPEED: float = float(os.getenv("VAANI_VOICE_SPEED", "1.0"))
+    VAANI_VOICE_PITCH: str = os.getenv("VAANI_VOICE_PITCH", "+0Hz")
+    COQUI_MODEL: str = os.getenv("COQUI_MODEL", "tts_models/en/ljspeech/tacotron2-DDC")
+    PYTTSX3_RATE: int = int(os.getenv("PYTTSX3_RATE", "180"))
+    PYTTSX3_VOLUME: float = float(os.getenv("PYTTSX3_VOLUME", "0.9"))
+    
+    # Conversational AI Settings
+    CONVERSATION_MEMORY_LIMIT: int = int(os.getenv("CONVERSATION_MEMORY_LIMIT", "50"))
+    ENABLE_VOICE_FEEDBACK: bool = os.getenv("ENABLE_VOICE_FEEDBACK", "true").lower() == "true"
+    
     @classmethod
     def validate_config(cls) -> bool:
         """Validate essential configuration"""
