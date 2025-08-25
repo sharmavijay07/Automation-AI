@@ -24,6 +24,7 @@ export default function Home() {
   const [selectedAgent, setSelectedAgent] = useState<string>('');
   const [lastResult, setLastResult] = useState<CommandResult | null>(null);
   const [showResult, setShowResult] = useState(false);
+  const [showWhatsAppPopup, setShowWhatsAppPopup] = useState(false);
   const [floatingElements, setFloatingElements] = useState<Array<{id: number; x: number; y: number; delay: number}>>([]);
 
   // Check backend status
@@ -82,6 +83,13 @@ export default function Home() {
       setShowResult(true);
       setShowCommandPopup(false);
       setActiveBubble(null);
+      
+      // Show WhatsApp popup only for successful WhatsApp agent operations
+      if (result.success && result.agent_used && result.agent_used.toLowerCase().includes('whatsapp')) {
+        setTimeout(() => {
+          setShowWhatsAppPopup(true);
+        }, 1500); // Show after 1.5 seconds
+      }
     } catch (error) {
       console.error('Error sending command:', error);
     } finally {
@@ -157,6 +165,60 @@ export default function Home() {
   const handleQuickCommand = (commandText: string) => {
     setCommand(commandText);
     sendCommand(commandText);
+  };
+
+  const shareToWhatsApp = async () => {
+    if (!lastResult) return;
+
+    // Extract WhatsApp link from the result message
+    const whatsappLinkMatch = lastResult.message.match(/https:\/\/wa\.me\/[^\s]+/);
+    
+    if (whatsappLinkMatch) {
+      // Use the existing WhatsApp link directly
+      const whatsappLink = whatsappLinkMatch[0];
+      setShowWhatsAppPopup(false);
+      window.open(whatsappLink, '_blank');
+     
+    } else {
+      // Fallback: try to extract phone number and message text separately
+      const phoneMatch = lastResult.message.match(/wa\.me\/([+]?[0-9]+)/);
+      const textMatch = lastResult.message.match(/text=([^&\s]+)/);
+      
+      if (phoneMatch && textMatch) {
+        const phoneNumber = phoneMatch[1];
+        const messageText = decodeURIComponent(textMatch[1]);
+        const encodedPhone = encodeURIComponent(phoneNumber.startsWith('+') ? phoneNumber : '+' + phoneNumber);
+        const encodedMessage = encodeURIComponent(messageText);
+        const whatsappUrl = `https://api.whatsapp.com/send/?phone=${encodedPhone}&text=${encodedMessage}&type=phone_number&app_absent=0`;
+        
+        setShowWhatsAppPopup(false);
+        window.open(whatsappUrl, '_blank');
+        alert('✅ WhatsApp opened with your message!');
+      } else {
+        // Final fallback - ask backend
+        try {
+          const response = await fetch('http://localhost:8000/process-command', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+              command: `Open WhatsApp link from: ${lastResult.message}` 
+            }),
+          });
+
+          if (response.ok) {
+            const linkResult = await response.json();
+            if (linkResult.success && linkResult.details && linkResult.details.whatsapp_link) {
+              window.open(linkResult.details.whatsapp_link, '_blank');
+            }
+          }
+          setShowWhatsAppPopup(false);
+          alert('✅ WhatsApp opened!');
+        } catch (error) {
+          setShowWhatsAppPopup(false);
+          alert('❌ Could not open WhatsApp link');
+        }
+      }
+    }
   };
 
   return (
@@ -409,6 +471,65 @@ export default function Home() {
                       </button>
                     ))}
                   </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* WhatsApp Share Popup */}
+        {showWhatsAppPopup && lastResult && lastResult.success && lastResult.agent_used && lastResult.agent_used.toLowerCase().includes('whatsapp') && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-md w-full animate-scale-in">
+              {/* Popup Header */}
+              <div className="flex items-center justify-between p-6 border-b border-gray-200">
+                <div className="flex items-center">
+                  <MessageCircle className="w-8 h-8 text-green-500 mr-3" />
+                  <h2 className="text-2xl font-bold text-gray-800">Share to WhatsApp</h2>
+                </div>
+                <button
+                  onClick={() => setShowWhatsAppPopup(false)}
+                  className="w-10 h-10 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center transition-colors"
+                  aria-label="Close WhatsApp popup"
+                  title="Close WhatsApp popup"
+                >
+                  <X className="w-5 h-5 text-gray-600" />
+                </button>
+              </div>
+
+              {/* Popup Content */}
+              <div className="p-6">
+                <div className="mb-6">
+                  <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-4">
+                    <h3 className="font-semibold text-green-800 mb-2">✅ Task Completed Successfully!</h3>
+                    <p className="text-green-700 text-sm">{lastResult.message}</p>
+                    <p className="text-green-600 text-xs mt-2">Agent: {lastResult.agent_used}</p>
+                  </div>
+                  
+                  <div className="text-center mb-4">
+                    <p className="text-lg text-gray-700">
+                      💬 Open WhatsApp with your original message?
+                    </p>
+                    <p className="text-sm text-gray-500 mt-2">
+                      📱 This will open WhatsApp directly with your message ready to send
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setShowWhatsAppPopup(false)}
+                    className="flex-1 px-6 py-4 bg-gray-500 text-white rounded-2xl hover:bg-gray-600 transition-colors font-semibold text-lg"
+                  >
+                    Not Now
+                  </button>
+                  <button
+                    onClick={shareToWhatsApp}
+                    className="flex-1 px-6 py-4 bg-green-500 text-white rounded-2xl hover:bg-green-600 transition-colors font-semibold text-lg flex items-center justify-center"
+                  >
+                    <MessageCircle className="w-6 h-6 mr-2" />
+                    Open WhatsApp
+                  </button>
                 </div>
               </div>
             </div>
