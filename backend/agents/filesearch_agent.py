@@ -50,7 +50,7 @@ class FileSearchTool(BaseTool):
         object.__setattr__(self, 'search_locations', self._get_search_locations())
     
     def _get_search_locations(self) -> List[str]:
-        """Get platform-specific search locations"""
+        """Get platform-specific search locations - expanded to cover all common directories"""
         system = platform.system().lower()
         locations = []
         
@@ -61,8 +61,12 @@ class FileSearchTool(BaseTool):
             locations.append(test_files_dir)
         
         if system == "windows":
-            # Windows search locations
+            # Windows search locations - comprehensive coverage
             user_profile = os.environ.get('USERPROFILE', '')
+            onedrive = os.environ.get('OneDrive', '')
+            onedrive_commercial = os.environ.get('OneDriveCommercial', '')
+            
+            # User directories
             locations.extend([
                 os.path.join(user_profile, 'Documents'),
                 os.path.join(user_profile, 'Desktop'),
@@ -70,8 +74,32 @@ class FileSearchTool(BaseTool):
                 os.path.join(user_profile, 'Pictures'),
                 os.path.join(user_profile, 'Videos'),
                 os.path.join(user_profile, 'Music'),
+                os.path.join(user_profile, 'OneDrive'),
+                os.path.join(user_profile, 'Favorites'),
+            ])
+            
+            # OneDrive locations (if configured)
+            if onedrive:
+                locations.extend([
+                    onedrive,
+                    os.path.join(onedrive, 'Documents'),
+                    os.path.join(onedrive, 'Desktop'),
+                    os.path.join(onedrive, 'Pictures')
+                ])
+            
+            if onedrive_commercial:
+                locations.extend([
+                    onedrive_commercial,
+                    os.path.join(onedrive_commercial, 'Documents')
+                ])
+            
+            # Public directories
+            locations.extend([
                 'C:\\Users\\Public\\Documents',
-                'C:\\Users\\Public\\Desktop'
+                'C:\\Users\\Public\\Desktop',
+                'C:\\Users\\Public\\Downloads',
+                'C:\\Users\\Public\\Pictures',
+                'C:\\Users\\Public\\Videos'
             ])
         elif system == "darwin":  # macOS
             home = os.path.expanduser('~')
@@ -155,70 +183,290 @@ class FileSearchTool(BaseTool):
             )
     
     def _run(self, query: str, max_results: int = 10) -> List[Dict[str, Any]]:
-        """Search for files matching the query"""
+        """
+        Search for files matching the query.
+        Enhanced to intelligently detect file extensions from natural language.
+        """
         results = []
         query_clean = query.strip()
         
-        print(f"[DEBUG] FileSearch: Searching for '{query_clean}'")
+        print(f"[DEBUG] FileSearch: Raw query: '{query_clean}'")
+        
+        # Check if query already has an extension (e.g., "report.pdf", "apple.pdf")
+        if '.' in query_clean:
+            filename_parts = query_clean.rsplit('.', 1)
+            if len(filename_parts) == 2 and len(filename_parts[1]) <= 5:
+                # Likely a file extension - search for this specific file in ALL locations
+                print(f"[DEBUG] FileSearch: Detected explicit extension in query")
+                print(f"[DEBUG] FileSearch: Will search in {len(self.search_locations)} locations")
+                
+                max_depth = 3  # Limit search depth to prevent hanging
+                
+                for location in self.search_locations:
+                    print(f"[DEBUG] FileSearch: Searching in {location}")
+                    location_matches = 0
+                    
+                    try:
+                        # Use os.walk instead of glob for better performance and control
+                        for root, dirs, files in os.walk(location):
+                            # Limit depth
+                            depth = root[len(location):].count(os.sep)
+                            if depth >= max_depth:
+                                dirs[:] = []  # Don't recurse deeper
+                                continue
+                            
+                            # Search in current directory
+                            for filename in files:
+                                if query_clean.lower() in filename.lower():
+                                    file_path = os.path.join(root, filename)
+                                    
+                                    try:
+                                        if os.path.isfile(file_path):
+                                            file_info = self._get_file_info(file_path)
+                                            match_score = self._fuzzy_match(query_clean.lower(), file_info.name.lower())
+                                            
+                                            if match_score > 0:
+                                                location_matches += 1
+                                                print(f"[DEBUG] FileSearch: Match found: {file_info.name} (score: {match_score}) in {os.path.basename(location)}")
+                                                results.append({
+                                                    "file_info": file_info.dict(),
+                                                    "match_score": match_score,
+                                                    "location": location
+                                                })
+                                                
+                                                # Limit results per location to speed up
+                                                if location_matches >= 5:
+                                                    break
+                                    except Exception as e:
+                                        print(f"[DEBUG] FileSearch: Error accessing file {filename}: {str(e)}")
+                                        continue
+                            
+                            if location_matches >= 5:
+                                break
+                        
+                        print(f"[DEBUG] FileSearch: Found {location_matches} matches in {os.path.basename(location)}")
+                        
+                    except Exception as e:
+                        print(f"[DEBUG] FileSearch: Error searching {location}: {str(e)}")
+                        continue
+                
+                # Remove duplicates and sort
+                unique_results = {}
+                for result in results:
+                    file_path = result["file_info"]["path"]
+                    if file_path not in unique_results or result["match_score"] > unique_results[file_path]["match_score"]:
+                        unique_results[file_path] = result
+                
+                # Add modification time for sorting
+                for result in unique_results.values():
+                    try:
+                        file_path = result["file_info"]["path"]
+                        mod_time = os.path.getmtime(file_path)
+                        result["mod_time"] = mod_time
+                    except:
+                        result["mod_time"] = 0
+                
+                # Sort by match score first, then by recency
+                sorted_results = sorted(
+                    unique_results.values(), 
+                    key=lambda x: (x["match_score"], x["mod_time"]), 
+                    reverse=True
+                )
+                
+                print(f"[DEBUG] FileSearch: Found {len(sorted_results)} unique files across all locations")
+                return sorted_results[:max_results]
+        
+        # Split query into keywords for better matching
+        keywords = [kw.lower() for kw in query_clean.split() if len(kw) > 1]
+        print(f"[DEBUG] FileSearch: Extracted keywords: {keywords}")
         print(f"[DEBUG] FileSearch: Search locations: {self.search_locations}")
         
         if not query_clean:
             print(f"[DEBUG] FileSearch: Empty query, returning no results")
             return []
         
+        # File extension detection - map natural language to extensions
+        extension_map = {
+            'pdf': '.pdf',
+            'word': '.docx',
+            'doc': '.doc',
+            'docx': '.docx',
+            'excel': '.xlsx',
+            'xls': '.xls',
+            'xlsx': '.xlsx',
+            'powerpoint': '.pptx',
+            'ppt': '.ppt',
+            'pptx': '.pptx',
+            'text': '.txt',
+            'txt': '.txt',
+            'image': ['.jpg', '.jpeg', '.png', '.gif'],
+            'photo': ['.jpg', '.jpeg', '.png'],
+            'picture': ['.jpg', '.jpeg', '.png'],
+            'jpg': '.jpg',
+            'jpeg': '.jpeg',
+            'png': '.png',
+            'gif': '.gif',
+            'mp4': '.mp4',
+            'mp3': '.mp3',
+            'zip': '.zip',
+            'rar': '.rar'
+        }
+        
+        detected_extensions = []
+        filename_keywords = []
+        
+        # Separate file type keywords from filename keywords
+        for keyword in keywords:
+            if keyword in extension_map:
+                ext = extension_map[keyword]
+                if isinstance(ext, list):
+                    detected_extensions.extend(ext)
+                else:
+                    detected_extensions.append(ext)
+                print(f"[DEBUG] FileSearch: Detected extension keyword '{keyword}' -> {ext}")
+            else:
+                filename_keywords.append(keyword)
+        
+        print(f"[DEBUG] FileSearch: Filename keywords: {filename_keywords}")
+        print(f"[DEBUG] FileSearch: Detected extensions: {detected_extensions}")
+        
         # Search in all locations
         for location in self.search_locations:
             print(f"[DEBUG] FileSearch: Searching in {location}")
             try:
-                # Search with different patterns
-                patterns = [
-                    f"*{query_clean}*",
-                    f"*{query_clean}*.*",
-                    f"{query_clean}*",
-                    f"*.{query_clean}",  # Extension search
-                ]
+                patterns = []
                 
-                for pattern in patterns:
-                    try:
-                        search_pattern = os.path.join(location, '**', pattern)
-                        print(f"[DEBUG] FileSearch: Pattern: {search_pattern}")
-                        matches = glob.glob(search_pattern, recursive=True)
-                        print(f"[DEBUG] FileSearch: Found {len(matches)} matches for pattern {pattern}")
+                if detected_extensions and filename_keywords:
+                    # We have both filename and extension: search for "keyword.ext"
+                    print(f"[DEBUG] FileSearch: Building patterns for filename + extension")
+                    for ext in detected_extensions:
+                        for keyword in filename_keywords:
+                            # Try different pattern combinations
+                            patterns.extend([
+                                f"*{keyword}*{ext}",  # apple.pdf, my_apple_file.pdf
+                                f"{keyword}*{ext}",   # apple.pdf, apple_report.pdf
+                                f"*{keyword}{ext}"    # myapple.pdf
+                            ])
+                
+                elif detected_extensions and not filename_keywords:
+                    # Only extension specified: search all files with that extension
+                    print(f"[DEBUG] FileSearch: Building patterns for extension only")
+                    for ext in detected_extensions:
+                        patterns.append(f"*{ext}")
+                
+                elif filename_keywords and not detected_extensions:
+                    # No extension detected, search by keywords only
+                    print(f"[DEBUG] FileSearch: Building patterns for filename only")
+                    for keyword in filename_keywords:
+                        patterns.extend([
+                            f"*{keyword}*",
+                            f"*{keyword}*.*",
+                            f"{keyword}*"
+                        ])
+                
+                else:
+                    # Fallback: use full query
+                    print(f"[DEBUG] FileSearch: Using fallback patterns")
+                    patterns.extend([
+                        f"*{query_clean}*",
+                        f"*{query_clean}*.*"
+                    ])
+                
+                # Remove duplicate patterns
+                patterns = list(set(patterns))
+                
+                # Use os.walk for faster, controlled search
+                max_depth = 3
+                location_matches = 0
+                
+                try:
+                    for root, dirs, files in os.walk(location):
+                        # Limit depth
+                        depth = root[len(location):].count(os.sep)
+                        if depth >= max_depth:
+                            dirs[:] = []
+                            continue
                         
-                        for match in matches:
-                            if os.path.isfile(match):
-                                file_info = self._get_file_info(match)
-                                match_score = self._fuzzy_match(query_clean, file_info.name)
-                                
-                                if match_score > 0:
-                                    print(f"[DEBUG] FileSearch: Match found: {file_info.name} (score: {match_score})")
-                                    results.append({
-                                        "file_info": file_info.dict(),
-                                        "match_score": match_score,
-                                        "location": location
-                                    })
-                    except Exception as e:
-                        print(f"[DEBUG] FileSearch: Pattern error: {str(e)}")
-                        continue
+                        # Search files in current directory
+                        for filename in files:
+                            filename_lower = filename.lower()
+                            
+                            # Check if any pattern matches
+                            match_found = False
+                            for pattern in patterns:
+                                # Simple pattern matching without glob
+                                pattern_clean = pattern.replace('*', '').replace('?', '')
+                                if pattern_clean.lower() in filename_lower:
+                                    match_found = True
+                                    break
+                            
+                            if match_found:
+                                file_path = os.path.join(root, filename)
+                                try:
+                                    if os.path.isfile(file_path):
+                                        file_info = self._get_file_info(file_path)
+                                        
+                                        # Score by keyword matches
+                                        keyword_score = sum(1 for kw in filename_keywords if kw in filename_lower)
+                                        match_score = self._fuzzy_match(query_clean, file_info.name) + (keyword_score * 10)
+                                        
+                                        if match_score > 0:
+                                            location_matches += 1
+                                            print(f"[DEBUG] FileSearch: Match found: {file_info.name} (score: {match_score}, keywords: {keyword_score})")
+                                            results.append({
+                                                "file_info": file_info.dict(),
+                                                "match_score": match_score,
+                                                "location": location
+                                            })
+                                            
+                                            if location_matches >= 5:
+                                                break
+                                except Exception as e:
+                                    continue
+                        
+                        if location_matches >= 5:
+                            break
+                    
+                    print(f"[DEBUG] FileSearch: Found {location_matches} matches in {os.path.basename(location)}")
+                    
+                except Exception as e:
+                    print(f"[DEBUG] FileSearch: Error searching {location}: {str(e)}")
+                    continue
                         
             except Exception as e:
                 print(f"[DEBUG] FileSearch: Location error for {location}: {str(e)}")
                 continue
         
-        # Sort by match score and remove duplicates
+        # Remove duplicates
         unique_results = {}
         for result in results:
             file_path = result["file_info"]["path"]
             if file_path not in unique_results or result["match_score"] > unique_results[file_path]["match_score"]:
                 unique_results[file_path] = result
         
-        # Sort by score and limit results
-        sorted_results = sorted(unique_results.values(), key=lambda x: x["match_score"], reverse=True)
+        # Add modification time to results for recency sorting
+        for result in unique_results.values():
+            try:
+                file_path = result["file_info"]["path"]
+                mod_time = os.path.getmtime(file_path)
+                result["mod_time"] = mod_time
+            except:
+                result["mod_time"] = 0
+        
+        # Sort by match score first, then by recency (modification time)
+        # This ensures best matches appear first, but recent files are prioritized within same score
+        sorted_results = sorted(
+            unique_results.values(), 
+            key=lambda x: (x["match_score"], x["mod_time"]), 
+            reverse=True
+        )
         final_results = sorted_results[:max_results]
         
         print(f"[DEBUG] FileSearch: Final results: {len(final_results)} files")
         for result in final_results:
-            print(f"[DEBUG] FileSearch: - {result['file_info']['name']} (score: {result['match_score']})")
+            mod_date = datetime.fromtimestamp(result['mod_time']).strftime('%Y-%m-%d %H:%M') if result.get('mod_time') else 'Unknown'
+            print(f"[DEBUG] FileSearch: - {result['file_info']['name']} (score: {result['match_score']}, modified: {mod_date})")
+            print(f"[DEBUG] FileSearch:   Location: {result['location']}")
         
         return final_results
 
@@ -356,21 +604,44 @@ class FileSearchAgent:
                 - open: Open a specific file
                 - share: Prepare file for sharing (often with WhatsApp)
                 
+                IMPORTANT: For QUERY, extract the filename and file extension separately. Handle natural language file type references.
+                
                 Extract:
                 1. Operation type (search/open/share)
-                2. File query (name, pattern, or type)
+                2. File query with proper filename and extension
                 3. Recipient (if sharing)
                 4. Additional context
+                
+                FILE EXTENSION RECOGNITION:
+                - "PDF" or "pdf file" -> add ".pdf" extension
+                - "Word" or "Word document" or "docx" -> add ".docx" extension
+                - "Excel" or "spreadsheet" or "xlsx" -> add ".xlsx" extension
+                - "PowerPoint" or "presentation" or "pptx" -> add ".pptx" extension
+                - "text file" or "txt" -> add ".txt" extension
+                - "image" or "picture" or "photo" -> can be .jpg, .png, .jpeg
                 
                 Examples:
                 - "Find my project file" -> operation: search, query: "project"
                 - "Open report.pdf" -> operation: open, query: "report.pdf"
-                - "Send photo.jpg to Mom on WhatsApp" -> operation: share, query: "photo.jpg", recipient: "Mom"
-                - "Search for Excel files" -> operation: search, query: "xlsx"
+                - "Open Apple PDF" -> operation: open, query: "apple.pdf"
+                - "Open Apple PDF from file" -> operation: open, query: "apple.pdf"
+                - "Find ownership document" -> operation: search, query: "ownership"
+                - "Search for Excel files" -> operation: search, query: ".xlsx"
+                - "Open presentation PowerPoint" -> operation: open, query: "presentation.pptx"
+                - "Find report Word document" -> operation: search, query: "report.docx"
+                - "Send photo.jpg to Mom" -> operation: share, query: "photo.jpg", recipient: "Mom"
+                - "open Jews learning from file" -> operation: open, query: "jews learning"
+                
+                QUERY EXTRACTION RULES:
+                - Remove: "open", "find", "search", "locate", "show", "get", "from file", "from"
+                - Remove: articles like "the", "a", "an", "my", "your"
+                - Convert file type words to extensions: "PDF" -> ".pdf", "Word" -> ".docx"
+                - If filename + file type mentioned, combine them: "Apple PDF" -> "apple.pdf"
+                - Keep it SHORT and add proper extension
                 
                 Return in this format:
                 OPERATION: [search/open/share]
-                QUERY: [file name/pattern]
+                QUERY: [SHORT filename/pattern - NO ACTION WORDS]
                 RECIPIENT: [name or empty]
                 CONTEXT: [additional info or empty]
                 
@@ -442,14 +713,40 @@ class FileSearchAgent:
                     if not results:
                         state['response_message'] = f"❌ No files found matching '{query}'. Try a different search term."
                     else:
-                        # Format search results
+                        # Format search results with location and recency info
                         result_text = f"🔍 Found {len(results)} file(s) matching '{query}':\n\n"
                         for i, result in enumerate(results[:5], 1):
                             file_info = result['file_info']
                             size_kb = file_info['size'] / 1024
-                            result_text += f"{i}. 📄 **{file_info['name']}**\n"
-                            result_text += f"   📂 {file_info['path']}\n"
-                            result_text += f"   📏 {size_kb:.1f}KB • {file_info['file_type']}\n\n"
+                            location = result.get('location', 'Unknown')
+                            
+                            # Show just the folder name from location
+                            location_name = os.path.basename(location) if location != 'Unknown' else 'Unknown'
+                            
+                            # Get modification date
+                            try:
+                                mod_time = result.get('mod_time', 0)
+                                if mod_time:
+                                    mod_date = datetime.fromtimestamp(mod_time)
+                                    # Show relative time if recent
+                                    now = datetime.now()
+                                    delta = now - mod_date
+                                    if delta.days == 0:
+                                        time_str = f"Today {mod_date.strftime('%H:%M')}"
+                                    elif delta.days == 1:
+                                        time_str = f"Yesterday {mod_date.strftime('%H:%M')}"
+                                    elif delta.days < 7:
+                                        time_str = f"{delta.days} days ago"
+                                    else:
+                                        time_str = mod_date.strftime('%Y-%m-%d')
+                                else:
+                                    time_str = "Unknown"
+                            except:
+                                time_str = "Unknown"
+                            
+                            result_text += f"{i}. � **{file_info['name']}**\n"
+                            result_text += f"   📂 {location_name} • 📏 {size_kb:.1f}KB • {file_info['file_type']}\n"
+                            result_text += f"   🕒 Modified: {time_str}\n\n"
                         
                         if len(results) > 5:
                             result_text += f"... and {len(results) - 5} more files\n"

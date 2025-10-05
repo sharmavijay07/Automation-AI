@@ -11,13 +11,26 @@ from pydantic import BaseModel, Field
 from agents.whatsapp_agent import whatsapp_agent
 from agents.conversation_agent import conversation_agent
 from agents.filesearch_agent import filesearch_agent
+from agents.email_agent import email_agent
+from agents.calendar_agent import calendar_agent
+from agents.phone_agent import phone_agent
+from agents.payment_agent import payment_agent
+from agents.app_launcher_agent import app_launcher_agent
+from agents.websearch_agent import websearch_agent
+from agents.task_agent import task_agent
+from agents.screenshot_agent import screenshot_agent
+from agents.system_control_agent import system_control_agent
 from config import config
 from utils.conversation_memory import conversation_memory
 from utils.conversational_tts import conversational_tts
+from utils.feature_request_logger import feature_logger
+from agents.multi_task_orchestrator import MultiTaskOrchestrator
 
 class AgentManagerState(TypedDict):
     """State for the agent manager workflow"""
     user_input: str
+    original_input: str  # Store original before enhancement
+    enhanced_input: str  # AI-enhanced version
     detected_intent: str
     agent_name: str
     agent_response: Dict[str, Any]
@@ -43,14 +56,115 @@ class AgentManager:
         self.agents = {
             "whatsapp": whatsapp_agent,
             "conversation": conversation_agent,
-            "filesearch": filesearch_agent
+            "filesearch": filesearch_agent,
+            "email": email_agent,
+            "calendar": calendar_agent,
+            "phone": phone_agent,
+            "payment": payment_agent,
+            "app_launcher": app_launcher_agent,
+            "websearch": websearch_agent,
+            "task": task_agent,
+            "screenshot": screenshot_agent,
+            "system_control": system_control_agent
         }
+        
+        # Initialize multi-task orchestrator
+        self.orchestrator = MultiTaskOrchestrator(self)
         
         # Build MCP workflow
         self.workflow = self._build_workflow()
     
     def _build_workflow(self) -> StateGraph:
         """Build the MCP workflow for agent coordination"""
+        
+        def ai_enhancement_node(state: AgentManagerState) -> AgentManagerState:
+            """
+            UNIVERSAL AI ENHANCEMENT LAYER
+            Process ALL commands through Groq AI to understand natural language better
+            Converts casual/messy speech into clear, structured commands
+            """
+            try:
+                original_input = state['user_input']
+                
+                # Store original
+                state['original_input'] = original_input
+                
+                print(f"\n[DEBUG] AI Enhancement Layer:")
+                print(f"[DEBUG] Original: '{original_input}'")
+                
+                # Use Groq AI to enhance and clarify the command
+                system_msg = SystemMessage(content="""You are an intelligent command enhancement AI. 
+Your job is to understand what the user REALLY wants to do, even if they speak casually or make typos.
+
+ENHANCEMENT RULES:
+1. Fix typos and spacing in emails/names (e.g., "7819 Vijay sharma@gmail.com" → "7819Vijaysharma@gmail.com")
+2. Clarify vague requests (e.g., "find that apple thing" → "find apple.pdf file")
+3. Expand abbreviated commands (e.g., "msg Jay" → "send WhatsApp message to Jay")
+4. Preserve all important details (names, numbers, subjects, context)
+5. Make commands more specific and actionable
+6. Keep the intent clear (email, call, search, etc.)
+7. Add missing context when obvious (e.g., "send to Jay" → identify what to send)
+
+EXAMPLES:
+Input: "send email to Jay his email is 7819 Vijay sharma@gmail.com subject internship give details from graph api"
+Output: "send email to 7819Vijaysharma@gmail.com with subject 'application for internship' and include details about the Graph API project"
+
+Input: "call jay"
+Output: "call Jay"
+
+Input: "find that ownership doc"
+Output: "find ownership document file"
+
+Input: "msg mom about dinner"
+Output: "send WhatsApp message to Mom saying let's have dinner"
+
+Input: "pay 100 to jay paytm"
+Output: "send payment of Rs 100 to Jay using Paytm"
+
+Input: "open apple pdf from file"
+Output: "open apple.pdf file"
+
+Input: "search for cats on youtube"
+Output: "search for cats on YouTube"
+
+IMPORTANT:
+- Return ONLY the enhanced command, no explanations
+- Keep it natural and conversational
+- Don't over-complicate simple commands
+- Preserve the user's intent exactly""")
+                
+                human_msg = HumanMessage(content=f"Enhance this command: {original_input}")
+                
+                try:
+                    response = self.llm.invoke([system_msg, human_msg])
+                    enhanced_input = response.content.strip()
+                    
+                    # Basic validation - if AI returns something weird, use original
+                    if len(enhanced_input) > len(original_input) * 3 or len(enhanced_input) < 3:
+                        print(f"[DEBUG] AI enhancement seems off, using original")
+                        enhanced_input = original_input
+                    
+                    state['enhanced_input'] = enhanced_input
+                    state['user_input'] = enhanced_input  # Use enhanced version for routing
+                    
+                    print(f"[DEBUG] Enhanced: '{enhanced_input}'")
+                    
+                    if original_input != enhanced_input:
+                        print(f"[DEBUG] ✨ Command was enhanced by AI")
+                    else:
+                        print(f"[DEBUG] Command unchanged")
+                        
+                except Exception as e:
+                    print(f"[DEBUG] AI enhancement failed: {str(e)}, using original")
+                    state['enhanced_input'] = original_input
+                    state['user_input'] = original_input
+                
+            except Exception as e:
+                print(f"[DEBUG] Enhancement error: {str(e)}")
+                state['enhanced_input'] = state['user_input']
+                state['original_input'] = state['user_input']
+            
+            return state
         
         def intent_detection_node(state: AgentManagerState) -> AgentManagerState:
             """Enhanced intent detection with conversational AI and natural language understanding"""
@@ -64,6 +178,13 @@ class AgentManager:
                     state['error'] = None
                 
                 user_input = state['user_input']
+                
+                # Check for multi-task workflows FIRST (highest priority)
+                if self.orchestrator.detect_multi_task(user_input):
+                    state['detected_intent'] = "multi_task"
+                    state['agent_name'] = "multi_task"
+                    print(f"[DEBUG] Multi-task workflow detected")
+                    return state
                 user_input_lower = user_input.lower()
                 
                 print(f"\n[DEBUG] Intent Detection:")
@@ -76,6 +197,15 @@ class AgentManager:
                 # Enhanced keyword detection with NLP patterns
                 file_keywords = ["find", "search", "open", "file", "document", "folder", "pdf", "doc", "excel", "photo", "video", "music", "ownership", "report", "presentation"]
                 whatsapp_keywords = ["whatsapp", "message", "send to", "text", "tell", "let know", "inform", "send whatsapp", "whatsapp to", "message to", "share"]
+                email_keywords = ["email", "send email", "compose email", "draft email", "mail to"]
+                calendar_keywords = ["calendar", "schedule", "meeting", "appointment", "event", "remind me at"]
+                phone_keywords = ["call", "phone", "dial", "ring", "make a call"]
+                payment_keywords = ["pay", "payment", "send money", "transfer", "paypal", "googlepay", "paytm", "phonepe"]
+                app_keywords = ["open", "launch", "start", "run", "chrome", "browser", "notepad", "calculator"]
+                search_keywords = ["google", "search for", "look up", "find on google", "youtube", "browse"]
+                task_keywords = ["task", "todo", "remind me", "reminder", "add task", "create task", "list tasks"]
+                screenshot_keywords = ["screenshot", "capture screen", "screen capture", "take screenshot", "capture", "take a screenshot"]
+                system_control_keywords = ["volume", "mute", "unmute", "lock", "shutdown", "restart", "reboot", "sleep", "hibernate", "louder", "quieter", "volume up", "volume down", "increase volume", "decrease volume", "lock screen", "shut down", "turn off", "brightness", "brightness up", "brightness down", "brighter", "dimmer", "battery", "battery status", "battery level", "time", "what time", "current time", "what's the time"]
                 
                 # Detect file intent with better distinction
                 file_keywords = ["find", "search", "open", "ownership", "folder", "photo", "video", "pdf", "doc", "docx", "excel", "presentation", "report"]
@@ -92,6 +222,15 @@ class AgentManager:
                 
                 # Multi-agent detection (file + communication)
                 has_whatsapp_intent = any(keyword in user_input_lower for keyword in whatsapp_keywords)
+                has_email_intent = any(keyword in user_input_lower for keyword in email_keywords)
+                has_calendar_intent = any(keyword in user_input_lower for keyword in calendar_keywords)
+                has_phone_intent = any(keyword in user_input_lower for keyword in phone_keywords)
+                has_payment_intent = any(keyword in user_input_lower for keyword in payment_keywords)
+                has_app_intent = any(keyword in user_input_lower for keyword in app_keywords)
+                has_search_intent = any(keyword in user_input_lower for keyword in search_keywords)
+                has_task_intent = any(keyword in user_input_lower for keyword in task_keywords)
+                has_screenshot_intent = any(keyword in user_input_lower for keyword in screenshot_keywords)
+                has_system_control_intent = any(keyword in user_input_lower for keyword in system_control_keywords)
                 
                 # Special handling for multi-agent patterns
                 multi_agent_patterns = ["send * to", "share * with", "find * and send", "send the * file"]
@@ -105,21 +244,97 @@ class AgentManager:
                 print(f"[DEBUG] Is general question: {is_general_question}")
                 print(f"[DEBUG] Has file operation: {has_file_operation}")
                 print(f"[DEBUG] Has WhatsApp intent: {has_whatsapp_intent}")
+                print(f"[DEBUG] Has Email intent: {has_email_intent}")
+                print(f"[DEBUG] Has Calendar intent: {has_calendar_intent}")
+                print(f"[DEBUG] Has Phone intent: {has_phone_intent}")
+                print(f"[DEBUG] Has Payment intent: {has_payment_intent}")
+                print(f"[DEBUG] Has App intent: {has_app_intent}")
+                print(f"[DEBUG] Has Search intent: {has_search_intent}")
+                print(f"[DEBUG] Has Task intent: {has_task_intent}")
+                print(f"[DEBUG] Has Screenshot intent: {has_screenshot_intent}")
+                print(f"[DEBUG] Has System Control intent: {has_system_control_intent}")
                 print(f"[DEBUG] Is WhatsApp command: {is_whatsapp_command}")
                 print(f"[DEBUG] Is multi-agent command: {is_multi_agent_command}")
                 
-                # Priority routing: Multi-agent commands first
-                if is_multi_agent_command or (has_file_operation and has_whatsapp_intent):
-                    state['detected_intent'] = "multi_agent"
-                    state['agent_name'] = "multi_agent"
-                    print(f"[DEBUG] Routed to: multi_agent (file + whatsapp)")
+                # Priority routing: Check for multi-task workflows FIRST
+                # Use orchestrator to detect complex workflows
+                is_multi_task_workflow = self.orchestrator.detect_workflow(user_input)
+                
+                if is_multi_task_workflow:
+                    state['detected_intent'] = "multi_task"
+                    state['agent_name'] = "multi_task"
+                    print(f"[DEBUG] Routed to: multi_task (orchestrator detected workflow)")
                     return state
                 
-                # WhatsApp commands override conversational detection
-                elif is_whatsapp_command or (has_whatsapp_intent and not has_file_operation and not is_capability_question):
+                # Communication agents (WhatsApp/Email) - Check BEFORE system control to prevent false positives
+                # WhatsApp commands override other detections
+                elif is_whatsapp_command or (has_whatsapp_intent and not is_capability_question):
                     state['detected_intent'] = "whatsapp"
                     state['agent_name'] = "whatsapp"
                     print(f"[DEBUG] Routed to: whatsapp")
+                    return state
+                
+                # Email commands
+                elif has_email_intent and not is_capability_question:
+                    state['detected_intent'] = "email"
+                    state['agent_name'] = "email"
+                    print(f"[DEBUG] Routed to: email")
+                    return state
+                
+                # System control commands (ONLY if no communication intent)
+                elif has_system_control_intent and not has_whatsapp_intent and not has_email_intent:
+                    state['detected_intent'] = "system_control"
+                    state['agent_name'] = "system_control"
+                    print(f"[DEBUG] Routed to: system_control")
+                    return state
+                
+                # Screenshot commands
+                elif has_screenshot_intent:
+                    state['detected_intent'] = "screenshot"
+                    state['agent_name'] = "screenshot"
+                    print(f"[DEBUG] Routed to: screenshot")
+                    return state
+                
+                # Payment commands
+                elif has_payment_intent:
+                    state['detected_intent'] = "payment"
+                    state['agent_name'] = "payment"
+                    print(f"[DEBUG] Routed to: payment")
+                    return state
+                
+                # Phone/Call commands
+                elif has_phone_intent:
+                    state['detected_intent'] = "phone"
+                    state['agent_name'] = "phone"
+                    print(f"[DEBUG] Routed to: phone")
+                    return state
+                
+                # Calendar commands
+                elif has_calendar_intent:
+                    state['detected_intent'] = "calendar"
+                    state['agent_name'] = "calendar"
+                    print(f"[DEBUG] Routed to: calendar")
+                    return state
+                
+                # Task management commands
+                elif has_task_intent:
+                    state['detected_intent'] = "task"
+                    state['agent_name'] = "task"
+                    print(f"[DEBUG] Routed to: task")
+                    return state
+                
+                # Web search commands
+                elif has_search_intent and not has_file_operation:
+                    state['detected_intent'] = "websearch"
+                    state['agent_name'] = "websearch"
+                    print(f"[DEBUG] Routed to: websearch")
+                    return state
+                
+                # App launcher commands (open/launch apps)
+                elif has_app_intent and not has_file_operation:
+                    state['detected_intent'] = "app_launcher"
+                    state['agent_name'] = "app_launcher"
+                    print(f"[DEBUG] Routed to: app_launcher")
                     return state
                 
                 # File operations (actual operations, not capability questions)
@@ -153,6 +368,34 @@ class AgentManager:
                 - whatsapp: WhatsApp messaging and communication
                   * Patterns: "send message", "whatsapp", "text someone", "message [name]"
                   * Natural: "tell mom I'm coming", "let dad know about meeting", "send hello to friend"
+                
+                - email: Email composition and sending
+                  * Patterns: "send email", "email to", "compose email", "mail"
+                  * Natural: "email boss about meeting", "send email to john"
+                
+                - calendar: Schedule meetings and events
+                  * Patterns: "schedule", "meeting", "calendar", "appointment", "event"
+                  * Natural: "schedule meeting tomorrow", "create event for Monday"
+                
+                - phone: Make phone calls
+                  * Patterns: "call", "phone", "dial", "ring"
+                  * Natural: "call mom", "phone vijay", "make a call to boss"
+                
+                - payment: Send payments via various apps
+                  * Patterns: "pay", "send money", "payment", "paypal", "googlepay"
+                  * Natural: "pay $50 to john", "send 100 rupees via paytm"
+                
+                - app_launcher: Open applications and programs
+                  * Patterns: "open", "launch", "start", "run"
+                  * Natural: "open chrome", "launch calculator", "start notepad"
+                
+                - websearch: Web searches and browsing
+                  * Patterns: "google", "search", "look up", "find on google"
+                  * Natural: "google python tutorials", "search for restaurants"
+                
+                - task: Task and reminder management
+                  * Patterns: "add task", "remind me", "todo", "task list"
+                  * Natural: "remind me to call mom", "add task buy groceries"
                   
                 - filesearch: File operations, search, open, and sharing
                   * Patterns: "find file", "open document", "search for", "locate", "show me files"
@@ -226,8 +469,13 @@ class AgentManager:
                 agent_name = state.get('agent_name')
                 user_input = state['user_input']
                 
-                # Handle multi-agent workflows
-                if agent_name == "multi_agent":
+                # Handle multi-task workflows
+                if agent_name == "multi_task":
+                    state['agent_response'] = self.orchestrator.execute_workflow(user_input)
+                    return state
+                
+                # Handle old multi-agent workflows (deprecated, use multi_task instead)
+                elif agent_name == "multi_agent":
                     state['agent_response'] = self._handle_multi_agent_workflow(user_input)
                     return state
                 
@@ -238,13 +486,42 @@ class AgentManager:
                     state['agent_response'] = self.agents["whatsapp"].process_command(user_input)
                 elif agent_name == "filesearch":
                     state['agent_response'] = self.agents["filesearch"].process_command(user_input)
+                elif agent_name == "email":
+                    state['agent_response'] = self.agents["email"].process_command(user_input)
+                elif agent_name == "calendar":
+                    state['agent_response'] = self.agents["calendar"].process_command(user_input)
+                elif agent_name == "phone":
+                    state['agent_response'] = self.agents["phone"].process_command(user_input)
+                elif agent_name == "payment":
+                    state['agent_response'] = self.agents["payment"].process_command(user_input)
+                elif agent_name == "app_launcher":
+                    state['agent_response'] = self.agents["app_launcher"].process_command(user_input)
+                elif agent_name == "websearch":
+                    state['agent_response'] = self.agents["websearch"].process_command(user_input)
+                elif agent_name == "task":
+                    state['agent_response'] = self.agents["task"].process_command(user_input)
+                elif agent_name == "screenshot":
+                    state['agent_response'] = self.agents["screenshot"].process_command(user_input)
+                elif agent_name == "system_control":
+                    state['agent_response'] = self.agents["system_control"].process_command(user_input)
                 else:
-                    # Fallback to conversation agent for unknown intents
+                    # Log unimplemented feature request
+                    feature_logger.log_request(
+                        user_input=user_input,
+                        detected_intent=state.get('detected_intent', 'unknown'),
+                        reason="No matching agent found",
+                        context={
+                            "original_input": state.get('original_input'),
+                            "enhanced_input": state.get('enhanced_input')
+                        }
+                    )
+                    
+                    # Fallback with feature request message
                     state['agent_response'] = {
-                        "success": True,
-                        "message": "Hi! I'm Vaani, your AI assistant. I can help with WhatsApp messages, finding files, and general tasks. What would you like me to do?",
-                        "intent": "fallback",
-                        "context": {}
+                        "success": False,
+                        "message": feature_logger.get_user_message(user_input),
+                        "intent": "unimplemented",
+                        "context": {"feature_logged": True}
                     }
                 
                 return state
@@ -282,13 +559,15 @@ class AgentManager:
         # Build the workflow graph
         workflow = StateGraph(AgentManagerState)
         
-        # Add nodes
+        # Add nodes (AI Enhancement is now the FIRST step)
+        workflow.add_node("ai_enhance", ai_enhancement_node)  # NEW: Universal AI enhancement
         workflow.add_node("detect_intent", intent_detection_node)
         workflow.add_node("route_to_agent", route_to_agent_node)
         workflow.add_node("generate_response", generate_response_node)
         
-        # Add edges
-        workflow.set_entry_point("detect_intent")
+        # Add edges (AI Enhancement → Intent Detection → Route → Response)
+        workflow.set_entry_point("ai_enhance")  # Start with AI enhancement
+        workflow.add_edge("ai_enhance", "detect_intent")  # Then detect intent
         workflow.add_edge("detect_intent", "route_to_agent")
         workflow.add_edge("route_to_agent", "generate_response")
         workflow.add_edge("generate_response", END)
@@ -590,11 +869,13 @@ class AgentManager:
             }
     
     def process_command(self, user_input: str) -> Dict[str, Any]:
-        """Process user command through MCP workflow"""
+        """Process user command through MCP workflow with AI enhancement"""
         try:
-            # Initialize state with proper structure
+            # Initialize state with proper structure (including new AI enhancement fields)
             initial_state: AgentManagerState = {
                 'user_input': user_input.strip(),
+                'original_input': '',  # Will be set by AI enhancement
+                'enhanced_input': '',  # Will be set by AI enhancement
                 'detected_intent': '',
                 'agent_name': '',
                 'agent_response': {},
@@ -602,11 +883,17 @@ class AgentManager:
                 'error': None
             }
             
-            # Run the workflow
+            # Run the workflow (now starts with AI enhancement)
             result = self.workflow.invoke(initial_state)
             
             # Ensure all required fields exist in response
             agent_response = result.get('agent_response', {})
+            
+            # Log enhancement if it happened
+            if result.get('original_input') != result.get('enhanced_input'):
+                print(f"[DEBUG] ✨ AI Enhancement applied:")
+                print(f"[DEBUG]    Original: {result.get('original_input')}")
+                print(f"[DEBUG]    Enhanced: {result.get('enhanced_input')}")
             
             return {
                 "success": not bool(result.get('error')),
@@ -620,7 +907,11 @@ class AgentManager:
                 "selected_file": agent_response.get('selected_file'),
                 "action_type": agent_response.get('action_type'),
                 "whatsapp_url": agent_response.get('whatsapp_url'),
-                "workflow": agent_response.get('workflow')
+                "workflow": agent_response.get('workflow'),
+                # AI enhancement tracking
+                "original_input": result.get('original_input', user_input),
+                "enhanced_input": result.get('enhanced_input', user_input),
+                "was_enhanced": result.get('original_input') != result.get('enhanced_input')
             }
             
         except Exception as e:
@@ -636,7 +927,10 @@ class AgentManager:
                 "selected_file": None,
                 "action_type": "error",
                 "whatsapp_url": None,
-                "workflow": None
+                "workflow": None,
+                "original_input": user_input,
+                "enhanced_input": user_input,
+                "was_enhanced": False
             }
     
     def get_available_agents(self) -> List[str]:

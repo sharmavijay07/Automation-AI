@@ -51,6 +51,31 @@ class Config:
     CONVERSATION_MEMORY_LIMIT: int = int(os.getenv("CONVERSATION_MEMORY_LIMIT", "50"))
     ENABLE_VOICE_FEEDBACK: bool = os.getenv("ENABLE_VOICE_FEEDBACK", "true").lower() == "true"
     
+    # Email Configuration
+    EMAIL_CLIENT: str = os.getenv("EMAIL_CLIENT", "default")
+    DEFAULT_EMAIL_FROM: str = os.getenv("DEFAULT_EMAIL_FROM", "your-email@gmail.com")
+    
+    # Calendar Configuration
+    CALENDAR_APP: str = os.getenv("CALENDAR_APP", "default")
+    
+    # Phone Configuration
+    PHONE_APP: str = os.getenv("PHONE_APP", "default")
+    
+    # Payment Configuration
+    PAYMENT_APPS: str = os.getenv("PAYMENT_APPS", "paypal,googlepay,paytm,phonepe")
+    
+    # Application Launcher Configuration
+    BROWSER_DEFAULT: str = os.getenv("BROWSER_DEFAULT", "chrome")
+    EDITOR_DEFAULT: str = os.getenv("EDITOR_DEFAULT", "notepad")
+    
+    # File Search Configuration
+    SEARCH_DIRECTORIES: str = os.getenv("SEARCH_DIRECTORIES", "C:\\Users,C:\\Documents,C:\\Downloads")
+    MAX_SEARCH_RESULTS: int = int(os.getenv("MAX_SEARCH_RESULTS", "10"))
+    
+    # Task Configuration
+    TASK_STORAGE: str = os.getenv("TASK_STORAGE", "local")
+    REMINDER_NOTIFICATIONS: bool = os.getenv("REMINDER_NOTIFICATIONS", "true").lower() == "true"
+    
     @classmethod
     def validate_config(cls) -> bool:
         """Validate essential configuration"""

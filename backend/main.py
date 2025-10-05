@@ -144,14 +144,25 @@ async def process_command(request: CommandRequest):
         if not request.command or not request.command.strip():
             raise HTTPException(status_code=400, detail="Command cannot be empty")
         
-        # Process command through enhanced agent manager
-        result = agent_manager.process_command(request.command)
+        # Process command through enhanced agent manager with timeout
+        try:
+            result = await asyncio.wait_for(
+                asyncio.to_thread(agent_manager.process_command, request.command),
+                timeout=30.0  # 30 second timeout
+            )
+        except asyncio.TimeoutError:
+            logger.error(f"Command processing timeout: {request.command}")
+            raise HTTPException(status_code=504, detail="Command processing timeout. Please try a more specific query.")
         
         # Enhanced logging with agent information
         logger.info(f"Command processed - Success: {result['success']}, Agent: {result['agent_used']}, Intent: {result['intent']}")
-        logger.info(f"Agent response details: {result.get('agent_response', {})}")
         
-        # Enhanced response structure
+        # Safe extraction of agent response
+        agent_response = result.get('agent_response', {})
+        if agent_response is None:
+            agent_response = {}
+        
+        # Enhanced response structure with safe access
         response = CommandResponse(
             success=result["success"],
             message=result["message"],
@@ -160,14 +171,14 @@ async def process_command(request: CommandRequest):
             timestamp=datetime.now().isoformat(),
             details={
                 "original_command": request.command,
-                "agent_response": result["agent_response"],
+                "agent_response": agent_response,
                 "error": result.get("error"),
                 "workflow": result.get("workflow"),
                 "conversation_context": result.get("conversation_context"),
-                "file_results": result.get("agent_response", {}).get("search_results", []),
-                "selected_file": result.get("agent_response", {}).get("selected_file"),
-                "action_type": result.get("agent_response", {}).get("action_type"),
-                "whatsapp_url": result.get("whatsapp_url") or result.get("agent_response", {}).get("whatsapp_url")
+                "file_results": agent_response.get("search_results", []),
+                "selected_file": agent_response.get("selected_file"),
+                "action_type": agent_response.get("action_type"),
+                "whatsapp_url": result.get("whatsapp_url") or agent_response.get("whatsapp_url")
             }
         )
         
@@ -178,7 +189,7 @@ async def process_command(request: CommandRequest):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error processing command: {str(e)}")
+        logger.error(f"Error processing command: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
 
 @app.post("/process-voice")
@@ -248,6 +259,48 @@ async def get_agents():
                 "description": "Send messages via WhatsApp with natural language",
                 "capabilities": ["Send messages", "Contact search", "URL generation"],
                 "examples": ["Send WhatsApp to Mom: I'm coming home", "Tell dad about the meeting"]
+            },
+            "email": {
+                "name": "Email Agent",
+                "description": "Compose and send emails via default mail client",
+                "capabilities": ["Email composition", "Send emails", "Draft emails"],
+                "examples": ["Email boss about the meeting", "Send email to john with subject Project Update"]
+            },
+            "calendar": {
+                "name": "Calendar Agent",
+                "description": "Schedule meetings and events",
+                "capabilities": ["Create events", "Schedule meetings", "Set appointments"],
+                "examples": ["Schedule meeting tomorrow at 3pm", "Create event for Monday morning"]
+            },
+            "phone": {
+                "name": "Phone Agent",
+                "description": "Make phone calls via system dialer",
+                "capabilities": ["Call contacts", "Dial numbers", "Contact search"],
+                "examples": ["Call mom", "Phone vijay", "Dial +1234567890"]
+            },
+            "payment": {
+                "name": "Payment Agent",
+                "description": "Send payments via various apps (PayPal, Google Pay, etc.)",
+                "capabilities": ["PayPal payments", "UPI payments", "Send money"],
+                "examples": ["Pay $50 to john via paypal", "Send 100 rupees to vijay via paytm"]
+            },
+            "app_launcher": {
+                "name": "App Launcher Agent",
+                "description": "Open applications and programs on your device",
+                "capabilities": ["Launch apps", "Open programs", "Start browsers"],
+                "examples": ["Open chrome", "Launch calculator", "Start notepad"]
+            },
+            "websearch": {
+                "name": "Web Search Agent",
+                "description": "Perform web searches on Google, YouTube, etc.",
+                "capabilities": ["Google search", "YouTube search", "Web browsing"],
+                "examples": ["Search for python tutorials", "Google best restaurants near me"]
+            },
+            "task": {
+                "name": "Task Management Agent",
+                "description": "Manage tasks, to-do lists, and reminders",
+                "capabilities": ["Add tasks", "List tasks", "Complete tasks", "Set reminders"],
+                "examples": ["Add task buy groceries", "List my tasks", "Remind me to call mom tomorrow"]
             },
             "conversation": {
                 "name": "Vaani (Conversational AI)",

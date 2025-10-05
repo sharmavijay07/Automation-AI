@@ -5,14 +5,19 @@ crewai-tools
 # FastAPI and Core Dependencies
 fastapi
 uvicorn[standard]
-pydantic
+pydantic>=2.0
+pydantic-settings
 python-multipart
 
 # AI and LLM Dependencies (Groq only - no OpenAI)
 langchain
 langchain-groq
 langchain-community
+langchain-core
 groq
+
+# LangGraph for agent workflows
+langgraph
 
 # Audio and Speech Processing
 SpeechRecognition
@@ -22,7 +27,7 @@ pygame
 
 # File and System Operations
 watchdog
-python-magic
+python-magic-bin
 pathlib2
 send2trash
 
@@ -49,7 +54,7 @@ motor
 edge-tts
 pyttsx3
 TTS
-whisper-openai
+openai-whisper
 vosk
 soundfile
 sounddevice
@@ -58,5 +63,15 @@ scipy
 librosa
 audioread
 
-langgraph
+# Streamlit for alternative UI
 streamlit
+
+# Additional utilities for agents
+psutil
+
+pillow
+mss
+pycaw
+comtypes
+psutil
+screen-brightness-control
