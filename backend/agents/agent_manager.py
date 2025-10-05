@@ -256,33 +256,9 @@ IMPORTANT:
                 print(f"[DEBUG] Is WhatsApp command: {is_whatsapp_command}")
                 print(f"[DEBUG] Is multi-agent command: {is_multi_agent_command}")
                 
-                # Priority routing: Check for multi-task workflows FIRST
-                # Use orchestrator to detect complex workflows
-                is_multi_task_workflow = self.orchestrator.detect_workflow(user_input)
-                
-                if is_multi_task_workflow:
-                    state['detected_intent'] = "multi_task"
-                    state['agent_name'] = "multi_task"
-                    print(f"[DEBUG] Routed to: multi_task (orchestrator detected workflow)")
-                    return state
-                
-                # Communication agents (WhatsApp/Email) - Check BEFORE system control to prevent false positives
-                # WhatsApp commands override other detections
-                elif is_whatsapp_command or (has_whatsapp_intent and not is_capability_question):
-                    state['detected_intent'] = "whatsapp"
-                    state['agent_name'] = "whatsapp"
-                    print(f"[DEBUG] Routed to: whatsapp")
-                    return state
-                
-                # Email commands
-                elif has_email_intent and not is_capability_question:
-                    state['detected_intent'] = "email"
-                    state['agent_name'] = "email"
-                    print(f"[DEBUG] Routed to: email")
-                    return state
-                
-                # System control commands (ONLY if no communication intent)
-                elif has_system_control_intent and not has_whatsapp_intent and not has_email_intent:
+                # Priority routing: Check for specific agent intents first
+                # System control commands (high priority - specific actions)
+                if has_system_control_intent:
                     state['detected_intent'] = "system_control"
                     state['agent_name'] = "system_control"
                     print(f"[DEBUG] Routed to: system_control")
@@ -316,6 +292,13 @@ IMPORTANT:
                     print(f"[DEBUG] Routed to: calendar")
                     return state
                 
+                # Email commands
+                elif has_email_intent and not has_whatsapp_intent:
+                    state['detected_intent'] = "email"
+                    state['agent_name'] = "email"
+                    print(f"[DEBUG] Routed to: email")
+                    return state
+                
                 # Task management commands
                 elif has_task_intent:
                     state['detected_intent'] = "task"
@@ -335,6 +318,20 @@ IMPORTANT:
                     state['detected_intent'] = "app_launcher"
                     state['agent_name'] = "app_launcher"
                     print(f"[DEBUG] Routed to: app_launcher")
+                    return state
+                
+                # Multi-agent commands first
+                elif is_multi_agent_command or (has_file_operation and has_whatsapp_intent):
+                    state['detected_intent'] = "multi_agent"
+                    state['agent_name'] = "multi_agent"
+                    print(f"[DEBUG] Routed to: multi_agent (file + whatsapp)")
+                    return state
+                
+                # WhatsApp commands override conversational detection
+                elif is_whatsapp_command or (has_whatsapp_intent and not has_file_operation and not is_capability_question):
+                    state['detected_intent'] = "whatsapp"
+                    state['agent_name'] = "whatsapp"
+                    print(f"[DEBUG] Routed to: whatsapp")
                     return state
                 
                 # File operations (actual operations, not capability questions)
